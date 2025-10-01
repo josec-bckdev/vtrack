@@ -1,57 +1,45 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.models import Base
-import os
-from dotenv import load_dotenv
 
-# Load environment variables (important for local testing outside Docker)
-load_dotenv()
+# Determine the database URL based on environment (using sqlite for testing)
+SQLALCHEMY_DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:password@db:5432/app_db")
+TESTING = os.environ.get("TESTING") == "1"
 
-# The database URL is typically pulled from environment variables.
-# In a docker-compose setup, this will be provided by the 'environment' block.
-# We use a default for non-docker execution or testing.
-SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "postgresql://user:password@localhost:5432/timestamps_db"
-)
+if TESTING:
+    # Use an in-memory SQLite database for testing
+    SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    )
+else:
+    # Use PostgreSQL engine
+    engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
-# 1. Create the SQLAlchemy Engine
-# The pool_pre_ping=True helps reconnect if the DB connection is dropped.
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, 
-    pool_pre_ping=True,
-    # Setting echo=True prints all SQL queries (useful for debugging)
-    # echo=True 
-)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# 2. Configure the Session
-# This session will be used to interact with the database.
-# autocommit=False: allows us to commit transactions explicitly.
-# autoflush=False: prevents the session from sending SQL to the DB automatically before a query.
-# bind=engine: associates this SessionLocal with our engine.
-SessionLocal = sessionmaker(
-    autocommit=False, 
-    autoflush=False, 
-    bind=engine
-)
+# Special session for testing to ensure isolation
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
-    """
-    Creates the database tables defined in models.py (if they don't exist).
-    This function should be called when the application starts.
-    """
+    """Initializes the database by creating all defined tables."""
+    print("Initializing database...")
+    if TESTING and os.path.exists("./test.db"):
+        # Delete previous test DB to ensure a clean slate
+        os.remove("./test.db")
+    
+    # Create tables defined in Base (from app.models)
     Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully.")
 
-# Dependency to get a database session for FastAPI endpoints
 def get_db():
-    """
-    Generator function to yield a database session (for FastAPI dependency injection).
-    Handles closing the session automatically.
-    """
+    """Dependency to provide a database session."""
     db = SessionLocal()
     try:
-        # Provide the session object to the caller
         yield db
     finally:
-        # Ensure the session is closed after the request is processed
         db.close()
+
+# Initialize the database immediately when the module is imported
+# The lifespan event in main.py will call init_db() on startup.

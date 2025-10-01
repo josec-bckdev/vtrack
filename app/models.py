@@ -1,21 +1,89 @@
-from sqlalchemy import Column, Integer, DateTime
-from sqlalchemy.orm import declarative_base
 from datetime import datetime
+from zoneinfo import ZoneInfo
+from enum import Enum
 
-# Base class from which all model classes inherit
+from pydantic import BaseModel, Field
+from sqlalchemy import Column, Integer, String, DateTime, Float
+from sqlalchemy.ext.declarative import declarative_base
+
 Base = declarative_base()
 
-class TimestampEntry(Base):
-    """
-    SQLAlchemy model for storing timestamp entries.
-    """
-    __tablename__ = 'timestamp_entries'
+class RouteDataEntry(Base):
+    """Normalized route data combining position and status information."""
+    __tablename__ = "route_data"
     
-    # Primary key: automatically increments
     id = Column(Integer, primary_key=True, index=True)
     
-    # The timestamp of when the entry was recorded
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Route identification
+    ruta = Column(Integer, index=True, nullable=False)
+    
+    # Position data (from valores)
+    ns_latitude = Column(Float, nullable=False)
+    ew_longitude = Column(Float, nullable=False)
+    position_ts = Column(DateTime, nullable=False)
+    
+    # Route status (from estados)
+    route_status = Column(String, nullable=False)
+    route_status_ts = Column(DateTime, nullable=False)
+    
+    # Student status (from estados)
+    student_status = Column(String, nullable=False)
+    student_status_ts = Column(DateTime, nullable=False)
+    
+    # Collection timestamp
+    collected_at = Column(
+        DateTime,
+        default=lambda: datetime.now(ZoneInfo("America/Bogota")),
+        nullable=False
+    )
 
-    def __repr__(self):
-        return f"<TimestampEntry(id={self.id}, timestamp='{self.timestamp}')>"
+class CollectionMetadata(Base):
+    """Tracks data collection sessions and their status."""
+    __tablename__ = "collection_sessions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    start_time = Column(DateTime, nullable=False)
+    stop_time = Column(DateTime, nullable=True)
+    status = Column(String, nullable=False)  # IDLE, ONGOING, FINISHED
+    datapoints_count = Column(Integer, default=0)
+    last_update_time = Column(DateTime, nullable=False)
+
+# Pydantic schemas for API responses
+class RouteDataResponse(BaseModel):
+    id: int
+    ruta: int
+    ns_latitude: float
+    ew_longitude: float
+    position_ts: datetime
+    route_status: str
+    route_status_ts: datetime
+    student_status: str
+    student_status_ts: datetime
+    collected_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class ScrapingResponse(BaseModel):
+    source: str
+    valores_data: list[list]
+    estados_data: list[list]
+
+class CollectionStatusEnum(str, Enum):
+    IDLE = "IDLE"
+    ONGOING = "ONGOING"
+    FINISHED = "FINISHED"
+
+class CollectionStatusResponse(BaseModel):
+    task_id: int | None = None
+    status: CollectionStatusEnum
+    message: str
+    start_time: datetime | None = None
+    stop_time: datetime | None = None
+    datapoints_collected: int = 0
+    task_id: int | None = Field(default=None, description="The ID of the current or last collection task.")
+    status: CollectionStatusEnum = Field(description="The current state of the collection manager.")
+    message: str
+    start_time: datetime | None = None
+    stop_time: datetime | None = None
+    datapoints_collected: int = Field(default=0, description="Total number of data points recorded in the database for the current task.")

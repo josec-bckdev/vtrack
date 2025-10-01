@@ -1,74 +1,89 @@
-from fastapi import FastAPI, Depends, HTTPException
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from datetime import datetime
-from app.database import init_db, get_db
-from app.models import TimestampEntry
-from typing import List
+from requests.exceptions import RequestException
 
-# Initialize the FastAPI application
-app = FastAPI(
-    title="FastAPI Web Scraper Scheduler API",
-    description="API for managing and serving web scraped data updates.",
-    version="1.0.0"
-)
+from app.database import get_db, init_db
+from app.scraper_async import collection_manager
+from app.models import CollectionStatusResponse, CollectionStatusEnum
 
-# --- Startup Event Handler ---
-@app.on_event("startup")
-def on_startup():
-    """
-    Initializes the database tables on application startup.
-    """
-    print("Initializing database tables...")
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handles application startup and shutdown events."""
     init_db()
-    print("Database initialization complete.")
+    logger.info("FastAPI application startup complete.")
+    yield
+    if collection_manager._is_running:
+        logger.info("Shutting down background collection task.")
+        await collection_manager.stop()
+    logger.info("FastAPI application shutdown complete.")
 
-# --- API Endpoints ---
+app = FastAPI(lifespan=lifespan)
 
-# 1. Endpoint to store the current time in the database
-@app.post("/record-time", response_model=dict, status_code=201)
-def record_current_timestamp(db: Session = Depends(get_db)):
-    """
-    Records the current UTC timestamp in the database.
-    """
+@app.post("/fetch-remote-data")
+async def fetch_data_from_remote_service():
+    """Performs the multi-step login and data fetching in a synchronous call."""
+    logger.info("Received request to fetch data from remote service.")
     try:
-        # Create a new model instance
-        new_entry = TimestampEntry(timestamp=datetime.utcnow())
-        
-        # Add to the session and commit the transaction
-        db.add(new_entry)
-        db.commit()
-        
-        # Refresh the instance to get the generated ID and actual timestamp from the DB
-        db.refresh(new_entry)
-        
-        # Return a confirmation response
+        data = await collection_manager._fetch_remote_data_async()
         return {
-            "message": "Timestamp recorded successfully",
-            "id": new_entry.id,
-            "timestamp_utc": new_entry.timestamp.isoformat()
+            "message": "Data successfully fetched from remote service.",
+            "data": data.dict()
         }
+    except RequestException as e:
+        logger.error(f"HTTP/Network Error during remote data fetching: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Service Unavailable: Could not connect to remote service or login failed. Details: {e}"
+        )
     except Exception as e:
-        db.rollback()
-        print(f"Database error: {e}")
-        raise HTTPException(status_code=500, detail="Could not record timestamp due to a server error.")
+        logger.error(f"Unexpected error during remote data fetching: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal Server Error: {e}"
+        )
 
-# 2. Endpoint to retrieve all recorded times (for verification)
-@app.get("/recorded-times", response_model=List[dict])
-def get_recorded_timestamps(db: Session = Depends(get_db)):
-    """
-    Retrieves all recorded timestamps from the database.
-    """
-    # Query all entries and order by ID descending (most recent first)
-    entries = db.query(TimestampEntry).order_by(TimestampEntry.id.desc()).all()
+@app.post("/collect/start", response_model=CollectionStatusResponse)
+async def start_collection(background_tasks: BackgroundTasks):
+    """Starts the background data collection task."""
+    try:
+        if collection_manager._is_running:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Collection is already running (Status: {collection_manager._status.value}). Stop it first or check status."
+            )
+        
+        await collection_manager.start()
+        status = await collection_manager.get_status()
+        return status
+
+    except Exception as e:
+        logger.error(f"Error starting collection: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start collection: {e}"
+        )
+
+@app.post("/collect/stop", response_model=CollectionStatusResponse)
+async def stop_collection():
+    """Stops the background data collection task."""
+    if not collection_manager._is_running:
+        raise HTTPException(
+            status_code=400,
+            detail="Collection task is not currently running."
+        )
     
-    # Format the output
-    results = [
-        {"id": entry.id, "timestamp_utc": entry.timestamp.isoformat()}
-        for entry in entries
-    ]
-    return results
+    await collection_manager.stop()
+    status = await collection_manager.get_status()
+    return status
 
-# 3. Simple root health check
-@app.get("/", response_model=dict)
-async def root():
-    return {"status": "ok", "service": "fastapi_api"}
+@app.get("/collect/status", response_model=CollectionStatusResponse)
+async def get_collection_status():
+    """Returns the current status and metadata of the collection task."""
+    status = await collection_manager.get_status()
+    return status
