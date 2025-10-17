@@ -81,9 +81,9 @@ class CollectionStatusResponse(BaseModel):
     start_time: datetime | None = None
     stop_time: datetime | None = None
     datapoints_collected: int = 0
-    task_id: int | None = Field(default=None, description="The ID of the current or last collection task.")
-    status: CollectionStatusEnum = Field(description="The current state of the collection manager.")
-    message: str
-    start_time: datetime | None = None
-    stop_time: datetime | None = None
-    datapoints_collected: int = Field(default=0, description="Total number of data points recorded in the database for the current task.")
+    # Optional scheduler info (added in main.py)
+    scheduler_running: bool | None = None
+    scheduled_times: str | None = None
+
+    class Config:
+        from_attributes = True

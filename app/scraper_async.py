@@ -267,6 +267,8 @@ class AsyncCollectionManager:
                     in_route = True
                 
                 if in_route and should_stop:
+                    # Save last data point
+                    await self._save_route_data_async(normalized_data)
                     logger.info("Stopping collection - route completed")
                     await self.stop()
                     return
@@ -336,6 +338,7 @@ class AsyncCollectionManager:
         return True
 
     async def get_status(self):
+        """Returns the current status and metadata of the collection task."""
         if self.current_task_id is None:
             return CollectionStatusResponse(
                 status=CollectionStatusEnum.IDLE,
@@ -352,6 +355,14 @@ class AsyncCollectionManager:
             stop_time=self.stop_time,
             datapoints_collected=self.datapoints_collected
         )
+
+    async def wait_for_completion(self):
+        """Wait for the current collection task to complete."""
+        if self._task:
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
 
 # Initialize manager
 collection_manager = AsyncCollectionManager()
