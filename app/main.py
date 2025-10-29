@@ -5,6 +5,7 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException
 from app.database import init_db
+from .data_server import router as data_server_router
 from app.scraper_async import collection_manager
 from app.models import CollectionStatusResponse, CollectionStatusEnum
 
@@ -131,6 +132,8 @@ async def lifespan(app: FastAPI):
     logger.info("FastAPI application shutdown complete")
 
 app = FastAPI(lifespan=lifespan)
+
+app.include_router(data_server_router, prefix="/data", tags=["data"])
 
 @app.post("/fetch-remote-data")
 async def fetch_data_from_remote_service():

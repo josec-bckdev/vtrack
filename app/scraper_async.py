@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 LOGIN_URL = "https://www.rutasljrj.net/rastreo/ljrj/login/validacion"
 VALORES_URL = "https://www.rutasljrj.net/rastreo/ljrj/admin/responsables/control/actualizaValores"
 ESTADOS_URL = "https://www.rutasljrj.net/rastreo/ljrj/admin/responsables/control/obtieneEstados"
-RESPONSABLE_PROFILE_ID = "35"
+RESPONSABLE_PROFILE_ID_LOGIN = "35"
+RESPONSABLE_PROFILE_ID_ESTADOS = "439"
 COLLECTION_INTERVAL_SECONDS = 15
 SESSION_EXPIRY_HOURS = 12
 
@@ -96,7 +97,7 @@ class AsyncCollectionManager:
         login_data = {
             'correo': SCRAPER_EMAIL,
             'clave': SCRAPER_PASSWORD,
-            'perfil': RESPONSABLE_PROFILE_ID
+            'perfil': RESPONSABLE_PROFILE_ID_LOGIN
         }
         
         logger.info(f"Logging in to {LOGIN_URL}...")
@@ -137,7 +138,7 @@ class AsyncCollectionManager:
         valores_data = valores_response.json()
 
         # Fetch estados data
-        estados_payload = {'responsable': RESPONSABLE_PROFILE_ID}
+        estados_payload = {'responsable': RESPONSABLE_PROFILE_ID_ESTADOS}
         estados_response = await client.post(ESTADOS_URL, data=estados_payload)
         estados_response.raise_for_status()
         estados_data = estados_response.json()
@@ -271,7 +272,7 @@ class AsyncCollectionManager:
                     await self._save_route_data_async(normalized_data)
                     logger.info("Stopping collection - route completed")
                     await self.stop()
-                    return
+                    break
 
                 # Save data if route is active and data changed
                 if in_route and self._check_data_changed(normalized_data):

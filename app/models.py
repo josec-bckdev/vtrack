@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 from enum import Enum
 
 from pydantic import BaseModel, Field
+from typing import List
 from sqlalchemy import Column, Integer, String, DateTime, Float
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -87,3 +88,27 @@ class CollectionStatusResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Data Server specific response models
+
+class CollectionMetadataResponse(BaseModel):
+    id: int
+    start_time: datetime
+    stop_time: datetime | None
+    status: str
+    datapoints_count: int
+    last_update_time: datetime
+
+    class Config:
+        from_attributes = True
+
+class CollectionWithDataResponse(BaseModel):
+    collection: CollectionMetadataResponse
+    datapoints: List[RouteDataResponse]
+
+    class Config:
+        from_attributes = True
+
+class TimeRangeRequest(BaseModel):
+    start: datetime
+    stop: datetime
