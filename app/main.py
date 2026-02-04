@@ -165,11 +165,14 @@ async def start_collection():
                 status_code=400,
                 detail=f"Collection is already running (Status: {collection_manager._status.value})"
             )
-        
+
         await collection_manager.start()
         status = await collection_manager.get_status()
         return status
 
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is (don't convert to 500)
+        raise
     except Exception as e:
         logger.error(f"Error starting collection: {e}")
         raise HTTPException(
