@@ -21,15 +21,15 @@ class RouteDataEntry(Base):
     # Position data (from valores)
     ns_latitude = Column(Float, nullable=False)
     ew_longitude = Column(Float, nullable=False)
-    position_ts = Column(DateTime, nullable=False)
+    position_ts = Column(DateTime, nullable=True)
     
     # Route status (from estados)
     route_status = Column(String, nullable=False)
-    route_status_ts = Column(DateTime, nullable=False)
+    route_status_ts = Column(DateTime, nullable=True)
     
     # Student status (from estados)
     student_status = Column(String, nullable=False)
-    student_status_ts = Column(DateTime, nullable=False)
+    student_status_ts = Column(DateTime, nullable=True)
     
     # Collection timestamp
     collected_at = Column(
