@@ -14,12 +14,27 @@ router = APIRouter()
 
 # Reusable helper to query datapoints between two datetimes
 def get_datapoints_by_time_range(
-        db: Session, 
-        start: datetime, 
+        db: Session,
+        start: datetime,
         stop: datetime
         ) -> List[models.RouteDataEntry]:
+    # Handle timezone-aware vs naive datetime comparison
+    # Make both naive or both aware for proper comparison
+    if start.tzinfo is not None and stop.tzinfo is None:
+        stop = stop.replace(tzinfo=start.tzinfo)
+    elif stop.tzinfo is not None and start.tzinfo is None:
+        start = start.replace(tzinfo=stop.tzinfo)
+
     if start > stop:
         raise HTTPException(status_code=400, detail="start must be <= stop")
+
+    # For SQLite: strip timezone info before querying
+    # SQLite doesn't store timezone, so we query with naive datetimes
+    if start.tzinfo is not None:
+        start = start.replace(tzinfo=None)
+    if stop.tzinfo is not None:
+        stop = stop.replace(tzinfo=None)
+
     return (
         db.query(models.RouteDataEntry)
         .filter(models.RouteDataEntry.collected_at >= start)
