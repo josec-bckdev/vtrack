@@ -55,11 +55,11 @@ class RouteDataResponse(BaseModel):
     ruta: int
     ns_latitude: float
     ew_longitude: float
-    position_ts: datetime
+    position_ts: datetime | None
     route_status: str
-    route_status_ts: datetime
+    route_status_ts: datetime | None
     student_status: str
-    student_status_ts: datetime
+    student_status_ts: datetime | None
     collected_at: datetime
 
     class Config:
