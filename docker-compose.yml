@@ -65,6 +65,25 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
 
+  # Migration service: runs Alembic migrations against the DB
+  migrate:
+    build: .
+    container_name: migrate_job
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: alembic upgrade head
+    working_dir: /app
+    volumes:
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./alembic:/app/alembic:ro
+      - ./app:/app/app:ro
+
 volumes:
   postgres_data:
   pgadmin_data:

@@ -12,6 +12,10 @@ WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy Alembic config and migration scripts so alembic is available in-container
+COPY alembic.ini /app/
+COPY alembic /app/alembic
+
 # Copy the application code into the container
 COPY app/ /app/app/
 
