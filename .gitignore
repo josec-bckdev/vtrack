@@ -1,6 +1,7 @@
 # Environment variables
 .env
 *.env
+.env.*
 
 # Python cache
 __pycache__/
@@ -16,5 +17,11 @@ htmlcov/
 
 # Virtual environments
 .venv/
+.github/
 venv/
 ENV/
+
+#VS Code
+.devcontainer/
+.vscode/
+vtrack-beast.code-workspace
