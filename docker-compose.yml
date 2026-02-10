@@ -19,8 +19,27 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - vtrack-network
 
-  #2. FastAPI Application Service
+  #2. Redis Message Queue Service
+  redis:
+    image: redis:7-alpine
+    container_name: redis_queue
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    networks:
+      - vtrack-network
+
+  #3. FastAPI Application Service
   api:
     build: .
     container_name: fastapi_api
@@ -28,11 +47,14 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file:
       - .env  # Load the same environment file
       - .env.dev  # Load development overrides
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
       SCRAPER_EMAIL: ${LOGIN_EMAIL}
       SCRAPER_PASSWORD: ${LOGIN_PASSWORD}
       PYTHONPATH: /app
@@ -44,8 +66,11 @@ services:
     volumes:
       - ./app:/app/app
       - ./requirements.txt:/app/requirements.txt  # Sync requirements
+      - ./shared-package:/app/shared-package
     stdin_open: true
     tty: true
+    networks:
+      - vtrack-network
     # Development-specific settings
     working_dir: /app
 
@@ -64,6 +89,8 @@ services:
       - db
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - vtrack-network
 
   # Migration service: runs Alembic migrations against the DB
   migrate:
@@ -83,7 +110,64 @@ services:
       - ./alembic.ini:/app/alembic.ini:ro
       - ./alembic:/app/alembic:ro
       - ./app:/app/app:ro
+    networks:
+      - vtrack-network
+
+  # Microservices - Alert Processor
+  alert-processor:
+    build:
+      context: .
+      dockerfile: microservices/alert-processor/Dockerfile
+    container_name: alert_processor
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      PYTHONUNBUFFERED: 1
+    networks:
+      - vtrack-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Data Collector Microservice (for independent data collection)
+  # Uncomment to enable as a separate service
+  # data-collector:
+  #   build:
+  #     context: .
+  #     dockerfile: microservices/data-collector/Dockerfile
+  #   container_name: data_collector
+  #   restart: always
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     DATABASE_URL: ${DATABASE_URL}
+  #     REDIS_URL: redis://redis:6379/0
+  #     PYTHONUNBUFFERED: 1
+  #   networks:
+  #     - vtrack-network
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
 
 volumes:
   postgres_data:
   pgadmin_data:
+  redis_data:
+
+networks:
+  vtrack-network:
+    driver: bridge

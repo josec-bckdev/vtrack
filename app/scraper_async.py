@@ -1,7 +1,7 @@
 import os
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from typing import Literal, Optional
 
@@ -14,6 +14,7 @@ from app.models import (
     RouteDataEntry, CollectionMetadata, CollectionStatusResponse
 )
 from app.database import SessionLocal
+from shared.message_queue import MessageQueue
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +25,7 @@ LOGIN_URL = "https://www.rutasljrj.net/rastreo/ljrj/login/validacion"
 VALORES_URL = "https://www.rutasljrj.net/rastreo/ljrj/admin/responsables/control/actualizaValores"
 ESTADOS_URL = "https://www.rutasljrj.net/rastreo/ljrj/admin/responsables/control/obtieneEstados"
 RESPONSABLE_PROFILE_ID_LOGIN = "35"
-RESPONSABLE_PROFILE_ID_ESTADOS = "439"
+RESPONSABLE_PROFILE_ID_ESTADOS = "867"
 COLLECTION_INTERVAL_SECONDS = 15
 SESSION_EXPIRY_HOURS = 12
 
@@ -77,7 +78,7 @@ def normalize_route_data(valores_data: list, estados_data: list) -> Optional[dic
         return None
 
 class AsyncCollectionManager:
-    def __init__(self):
+    def __init__(self, message_queue: Optional[MessageQueue] = None):
         self._task: asyncio.Task | None = None
         self._is_running = False
         self._status: CollectionStatusEnum = CollectionStatusEnum.IDLE
@@ -87,11 +88,15 @@ class AsyncCollectionManager:
         self.datapoints_collected: int = 0
         self.start_time: datetime | None = None
         self.stop_time: datetime | None = None
+        self.message_queue: Optional[MessageQueue] = message_queue
         
         # Session management
         self._last_login_time: Optional[datetime] = None
         self._session_cookies: Optional[dict] = None
         self._session_lock = asyncio.Lock()
+        
+        # Persistent httpx client to maintain session and connection pooling
+        self._client: Optional[httpx.AsyncClient] = None
 
     async def _login_async(self, client: httpx.AsyncClient) -> bool:
         login_data = {
@@ -129,19 +134,42 @@ class AsyncCollectionManager:
                 logger.info("Performing fresh login")
                 return await self._login_async(client)
 
+    def _get_unique_timestamp_param(self) -> dict:
+        """Returns a timestamp parameter dict to bypass server-side response caching."""
+        import time
+        return {'_t': str(int(time.time() * 1000))}
+
     async def _fetch_data_with_session(self, client: httpx.AsyncClient) -> ScrapingResponse:
         logger.info("Fetching route data...")
         
+        # Use no-cache headers to avoid server-side or intermediate caching
+        headers = {"Cache-Control": "no-cache", "Pragma": "no-cache"}
+        
+        # Add timestamp param to bypass server-side response caching
+        timestamp_param = self._get_unique_timestamp_param()
+
         # Fetch valores data
-        valores_response = await client.post(VALORES_URL)
+        valores_params = timestamp_param.copy()
+        valores_response = await client.post(VALORES_URL, headers=headers, params=valores_params)
         valores_response.raise_for_status()
-        valores_data = valores_response.json()
+        try:
+            valores_data = valores_response.json()
+            logger.debug(f"Valores response status: {valores_response.status_code}, data length: {len(str(valores_data))}")
+        except Exception as e:
+            logger.warning(f"Failed to parse valores JSON: {e}; response_text={valores_response.text[:1000]}")
+            raise
 
         # Fetch estados data
         estados_payload = {'responsable': RESPONSABLE_PROFILE_ID_ESTADOS}
-        estados_response = await client.post(ESTADOS_URL, data=estados_payload)
+        estados_timestamp_param = self._get_unique_timestamp_param()
+        estados_response = await client.post(ESTADOS_URL, data=estados_payload, headers=headers, params=estados_timestamp_param)
         estados_response.raise_for_status()
-        estados_data = estados_response.json()
+        try:
+            estados_data = estados_response.json()
+            logger.debug(f"Estados response status: {estados_response.status_code}, data length: {len(str(estados_data))}")
+        except Exception as e:
+            logger.warning(f"Failed to parse estados JSON: {e}; response_text={estados_response.text[:1000]}")
+            raise
 
         return ScrapingResponse(
             source="rutasljrj.net",
@@ -153,7 +181,14 @@ class AsyncCollectionManager:
         if not SCRAPER_EMAIL or not SCRAPER_PASSWORD:
             raise RuntimeError("Missing scraper credentials")
 
-        async with httpx.AsyncClient(follow_redirects=False) as client:
+        # Create persistent client on first use, reuse for subsequent requests
+        if self._client is None:
+            self._client = httpx.AsyncClient(follow_redirects=False)
+            logger.info("Created persistent httpx client for session reuse")
+        
+        client = self._client
+        
+        try:
             if not await self._ensure_valid_session(client):
                 raise RequestError("Failed to establish valid session")
 
@@ -169,6 +204,13 @@ class AsyncCollectionManager:
                     raise RequestError("Failed to re-establish session")
                 
                 return await self._fetch_data_with_session(client)
+        except Exception as e:
+            # On any error, close the client so it gets recreated fresh on next attempt
+            logger.warning(f"Error during fetch, will close and recreate client: {e}")
+            if self._client:
+                await self._client.aclose()
+                self._client = None
+            raise
 
     async def _set_status_async(self, status: CollectionStatusEnum):
         self._status = status
@@ -192,7 +234,14 @@ class AsyncCollectionManager:
             db.close()
 
     def _should_start_collection(self, normalized_data: dict) -> bool:
-        return normalized_data.get('route_status') == "En recorrido"
+        """Determine if collection should start based on route status and time 
+        bands. time bands inplemented due to unreliable values for route status."""
+        recorrido = normalized_data.get('route_status') == "En recorrido"
+        now = datetime.now(ZoneInfo("America/Bogota"))
+        in_am_time_band = time(5, 0) <= now.time() <= time(9, 0)
+        in_pm_time_band = time(15, 0) <= now.time() <= time(18, 0)
+        logger.info(f"Collection starting due to: recorrido={recorrido}, in_am_time_band={in_am_time_band}, in_pm_time_band={in_pm_time_band}")
+        return recorrido or in_am_time_band or in_pm_time_band
 
     def _should_stop_collection(self, normalized_data: dict) -> bool:
         student_status = normalized_data.get('student_status', '')
@@ -233,6 +282,21 @@ class AsyncCollectionManager:
                     db.commit()
             
             logger.info(f"Saved route data for ruta {normalized_data['ruta']}")
+            
+            # Push coordinate to Redis queue for alert processing
+            if self.message_queue:
+                try:
+                    self.message_queue.push_coordinate(
+                        ruta=normalized_data['ruta'],
+                        latitude=normalized_data['ns_latitude'],
+                        longitude=normalized_data['ew_longitude'],
+                        position_ts=normalized_data.get('position_ts'),
+                        route_status=normalized_data.get('route_status'),
+                        student_status=normalized_data.get('student_status')
+                    )
+                    logger.debug(f"Pushed coordinate to queue for ruta {normalized_data['ruta']}")
+                except Exception as e:
+                    logger.error(f"Failed to push coordinate to queue: {e}")
             
         except Exception as e:
             logger.error(f"Error saving route data: {e}")
@@ -334,6 +398,14 @@ class AsyncCollectionManager:
         async with self._session_lock:
             self._session_cookies = None
             self._last_login_time = None
+            
+            # Close persistent client
+            if self._client:
+                try:
+                    await self._client.aclose()
+                except Exception as e:
+                    logger.warning(f"Error closing httpx client: {e}")
+                self._client = None
         
         logger.info("Collection manager stopped")
         return True

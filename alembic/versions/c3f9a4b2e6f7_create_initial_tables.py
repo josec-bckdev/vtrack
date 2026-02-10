@@ -1,8 +1,8 @@
-"""Initial migration
+"""Create initial tables
 
-Revision ID: ab927e2e840d
-Revises: 
-Create Date: 2026-02-05 06:44:25.212667
+Revision ID: c3f9a4b2e6f7
+Revises: ab927e2e840d
+Create Date: 2026-02-09 12:00:00.000000
 
 """
 from typing import Sequence, Union
@@ -12,19 +12,18 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'ab927e2e840d'
-down_revision: Union[str, Sequence[str], None] = None
+revision: str = 'c3f9a4b2e6f7'
+down_revision: Union[str, Sequence[str], None] = 'ab927e2e840d'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
-    # Create tables to match SQLAlchemy models in app.models
+    """Upgrade schema: create tables matching SQLAlchemy models."""
     op.create_table(
         'route_data',
         sa.Column('id', sa.Integer(), primary_key=True),
-        sa.Column('ruta', sa.Integer(), nullable=False, index=False),
+        sa.Column('ruta', sa.Integer(), nullable=False),
         sa.Column('ns_latitude', sa.Float(), nullable=False),
         sa.Column('ew_longitude', sa.Float(), nullable=False),
         sa.Column('position_ts', sa.DateTime(), nullable=True),
@@ -47,7 +46,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
-    # Drop created tables
+    """Downgrade schema: drop created tables."""
     op.drop_table('collection_sessions')
     op.drop_table('route_data')

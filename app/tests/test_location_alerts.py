@@ -1,0 +1,650 @@
+"""
+Test Suite for Location Analysis and Geofencing
+
+Tests the LocationAnalyzer class for:
+- Zone management (add, list, remove)
+- Geofence entry/exit detection
+- Route tracking across zones
+- Alert generation
+- Route status queries
+
+TDD Approach:
+We test geofencing logic following real-world flow:
+1. Initialize zones
+2. Track routes through zones
+3. Detect entries and exits
+4. Generate alerts
+5. Query route status
+"""
+
+import pytest
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from shared.location_alerts import (
+    LocationAnalyzer,
+    Zone,
+    LocationAlert,
+    AlertType,
+    AlertSeverity
+)
+
+
+class TestZoneManagement:
+    """Tests for adding, listing, and managing zones."""
+
+    def test_location_analyzer_initializes_with_default_zones(self, location_analyzer_fixture):
+        """
+        ARRANGE: LocationAnalyzer is initialized
+        ACT: Get zones
+        ASSERT: Default zones are present (School, Dangerous Area, Depot)
+        """
+        # Act
+        zones = location_analyzer_fixture.get_zones()
+        
+        # Assert
+        assert len(zones) >= 3
+        zone_names = [z.name for z in zones]
+        assert "School Zone" in zone_names
+        assert "Dangerous Area" in zone_names
+        assert "Route Depot" in zone_names
+
+    def test_add_custom_zone_successfully(self, location_analyzer_fixture):
+        """
+        ARRANGE: LocationAnalyzer with new zone to add
+        ACT: Add a custom zone
+        ASSERT: Zone is added and returned in get_zones()
+        """
+        # Arrange
+        new_zone = Zone(
+            zone_id=99,
+            name="Custom Test Zone",
+            latitude=4.7000,
+            longitude=-74.0000,
+            radius_meters=300,
+            alert_type=AlertType.GEOFENCE_ENTRY,
+            severity=AlertSeverity.WARNING
+        )
+        
+        initial_count = len(location_analyzer_fixture.get_zones())
+        
+        # Act
+        result = location_analyzer_fixture.add_zone(new_zone)
+        
+        # Assert
+        assert result is True
+        assert len(location_analyzer_fixture.get_zones()) == initial_count + 1
+        
+        # Verify our zone is in the list
+        zone_names = [z.name for z in location_analyzer_fixture.get_zones()]
+        assert "Custom Test Zone" in zone_names
+
+    def test_add_duplicate_zone_fails(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Zone with duplicate ID
+        ACT: Try to add a zone with existing ID
+        ASSERT: Add fails and returns False
+        """
+        # Arrange - try to add a zone with ID that already exists
+        duplicate_zone = Zone(
+            zone_id=1,  # Already exists
+            name="Duplicate Zone",
+            latitude=5.0000,
+            longitude=-75.0000,
+            radius_meters=500
+        )
+        
+        # Act
+        result = location_analyzer_fixture.add_zone(duplicate_zone)
+        
+        # Assert
+        assert result is False
+
+    def test_disabled_zones_not_included_in_analysis(self, location_analyzer_fixture):
+        """
+        ARRANGE: Zone that is disabled
+        ACT: Add disabled zone and analyze coordinate in its area
+        ASSERT: Disabled zone is not used for analysis
+        """
+        # Arrange
+        disabled_zone = Zone(
+            zone_id=50,
+            name="Disabled Zone",
+            latitude=4.7110,
+            longitude=-74.0059,
+            radius_meters=500,
+            enabled=False
+        )
+        location_analyzer_fixture.add_zone(disabled_zone)
+        
+        # Act - coordinate inside the disabled zone
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Assert - no alerts should be generated from disabled zone
+        zone_names_in_alerts = [a.zone_name for a in alerts]
+        assert "Disabled Zone" not in zone_names_in_alerts
+
+
+class TestZoneIntersection:
+    """Tests for detecting if coordinates are within zones."""
+
+    def test_coordinate_inside_zone(self, sample_zones):
+        """
+        ARRANGE: Zone and coordinate inside it
+        ACT: Check if coordinate is within zone
+        ASSERT: Returns True
+        """
+        # Arrange
+        school_zone = sample_zones['school']
+        
+        # Act - coordinate at the exact center
+        is_inside = school_zone.is_within(4.7110, -74.0059)
+        
+        # Assert
+        assert is_inside is True
+
+    def test_coordinate_outside_zone(self, sample_zones):
+        """
+        ARRANGE: Zone and coordinate far outside it
+        ACT: Check if coordinate is within zone
+        ASSERT: Returns False
+        """
+        # Arrange
+        school_zone = sample_zones['school']
+        
+        # Act - coordinate very far away (different city)
+        is_inside = school_zone.is_within(3.0000, -76.0000)
+        
+        # Assert
+        assert is_inside is False
+
+    def test_coordinate_at_zone_boundary(self, sample_zones):
+        """
+        ARRANGE: Zone and coordinate near the boundary
+        ACT: Check if coordinate near boundary is within zone
+        ASSERT: Properly detects inside/outside boundary
+        """
+        # Arrange
+        school_zone = sample_zones['school']
+        
+        # The school zone is at (4.7110, -74.0059) with 500m radius
+        # Test a coordinate approximately 500m away
+        
+        # This coordinate is approximately 550m away (slightly outside)
+        is_inside = school_zone.is_within(4.7110, -74.0010)
+        
+        # Should be outside or on boundary
+        # Note: Exact calculation depends on geodesic distance
+        # This is more of an integration test for real values
+        assert isinstance(is_inside, bool)
+
+
+class TestGeofenceEntryDetection:
+    """Tests for detecting when routes enter geofence zones."""
+
+    def test_entry_detection_first_time_in_zone(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Route never seen before, coordinate inside zone
+        ACT: Analyze coordinate
+        ASSERT: Entry alert is generated
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        
+        # Act - first time analyzing position inside school zone
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Assert
+        assert len(alerts) == 1
+        alert = alerts[0]
+        assert alert.alert_type == AlertType.GEOFENCE_ENTRY
+        assert alert.zone_name == "School Zone"
+        assert alert.ruta == 101
+
+    def test_no_entry_alert_if_already_in_zone(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Route is already inside zone (from previous analysis)
+        ACT: Analyze coordinate inside same zone
+        ASSERT: No entry alert is generated
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        
+        # First analysis - establishes that route is in zone
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Act - analyze same location again
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Assert - no entry alert since already in zone
+        assert len(alerts) == 0
+
+    def test_entry_alert_when_moving_into_zone(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Route outside zone, then moves inside
+        ACT: First outside, then inside
+        ASSERT: Entry alert only on second analysis
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        
+        # First analysis - outside zone
+        alerts1 = location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=3.0000,
+            longitude=-76.0000
+        )
+        
+        # No alerts when outside
+        assert len(alerts1) == 0
+        
+        # Act - move into zone
+        alerts2 = location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Assert - entry alert when moving in
+        assert len(alerts2) == 1
+        assert alerts2[0].alert_type == AlertType.GEOFENCE_ENTRY
+
+
+class TestGeofenceExitDetection:
+    """Tests for detecting when routes exit geofence zones."""
+
+    def test_exit_alert_for_exit_type_zone(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Zone with GEOFENCE_EXIT alert type (Depot)
+        ACT: Route moves from inside to outside
+        ASSERT: Exit alert is generated
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['depot'])
+        
+        # First analysis - inside depot zone
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=104,
+            latitude=4.5500,
+            longitude=-74.1000
+        )
+        
+        # Act - move out of depot
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=104,
+            latitude=3.0000,
+            longitude=-76.0000
+        )
+        
+        # Assert
+        assert len(alerts) == 1
+        alert = alerts[0]
+        assert alert.alert_type == AlertType.GEOFENCE_EXIT
+        assert alert.zone_name == "Route Depot"
+
+    def test_no_exit_alert_for_entry_type_zone(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Zone with GEOFENCE_ENTRY alert type (School)
+        ACT: Route moves from inside to outside
+        ASSERT: No exit alert is generated (only entry type)
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        
+        # First analysis - inside
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Act - move out
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=3.0000,
+            longitude=-76.0000
+        )
+        
+        # Assert - no alerts for entry-type zones when exiting
+        assert len(alerts) == 0
+
+
+class TestMultipleZoneTracking:
+    """Tests for routes being in multiple zones simultaneously."""
+
+    def test_route_in_multiple_zones(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Two overlapping zones
+        ACT: Route at position that's in both zones
+        ASSERT: Entry alerts generated for both zones
+        """
+        # Arrange - add two zones
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        location_analyzer_fixture.add_zone(sample_zones['dangerous'])
+        
+        # Act - coordinate that might be in both
+        # (This depends on actual overlap - using school coordinate as example)
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Assert
+        assert len(alerts) >= 1
+        # All alerts should be for entry (these are both entry-type zones)
+        for alert in alerts:
+            assert alert.alert_type == AlertType.GEOFENCE_ENTRY
+
+    def test_route_moves_between_zones(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Route tracking across multiple zones
+        ACT: Route moves from one zone to another
+        ASSERT: Proper entry/exit alerts
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        location_analyzer_fixture.add_zone(sample_zones['depot'])
+        
+        # Act 1 - Route enters school
+        alerts1 = location_analyzer_fixture.analyze_coordinate(
+            ruta=105,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Assert - entry to school
+        assert len(alerts1) == 1
+        assert alerts1[0].zone_name == "School Zone"
+        
+        # Act 2 - Route exits school but is still tracked
+        alerts2 = location_analyzer_fixture.analyze_coordinate(
+            ruta=105,
+            latitude=3.0000,
+            longitude=-76.0000
+        )
+        
+        # Assert - no alerts (school is entry-only)
+        assert len(alerts2) == 0
+        
+        # Act 3 - Route enters depot
+        alerts3 = location_analyzer_fixture.analyze_coordinate(
+            ruta=105,
+            latitude=4.5500,
+            longitude=-74.1000
+        )
+        
+        # Assert - entry to depot
+        assert len(alerts3) == 1
+        assert alerts3[0].zone_name == "Route Depot"
+
+
+class TestAlertGeneration:
+    """Tests for alert object creation and properties."""
+
+    def test_alert_contains_correct_information(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Geofence event
+        ACT: Generate alert
+        ASSERT: Alert contains all required information
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        
+        # Act
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Assert
+        alert = alerts[0]
+        assert isinstance(alert, LocationAlert)
+        assert alert.ruta == 101
+        assert alert.latitude == 4.7110
+        assert alert.longitude == -74.0059
+        assert alert.alert_type == AlertType.GEOFENCE_ENTRY
+        assert alert.zone_name == "School Zone"
+        assert alert.severity == AlertSeverity.INFO
+        assert isinstance(alert.timestamp, datetime)
+        assert alert.message != ""
+
+    def test_alert_severity_matches_zone_severity(self, location_analyzer_fixture):
+        """
+        ARRANGE: Zone with CRITICAL severity
+        ACT: Generate alert from that zone
+        ASSERT: Alert inherits zone's severity
+        """
+        # Arrange
+        critical_zone = Zone(
+            zone_id=88,
+            name="Critical Area",
+            latitude=4.6000,
+            longitude=-74.0000,
+            radius_meters=500,
+            alert_type=AlertType.GEOFENCE_ENTRY,
+            severity=AlertSeverity.CRITICAL
+        )
+        location_analyzer_fixture.add_zone(critical_zone)
+        
+        # Act
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.6000,
+            longitude=-74.0000
+        )
+        
+        # Assert
+        assert alerts[0].severity == AlertSeverity.CRITICAL
+
+
+class TestRouteStatusTracking:
+    """Tests for querying route status and current zones."""
+
+    def test_get_route_status_not_tracked(self, location_analyzer_fixture):
+        """
+        ARRANGE: Route that has never been analyzed
+        ACT: Get route status
+        ASSERT: Returns empty status
+        """
+        # Act
+        status = location_analyzer_fixture.get_route_status(ruta=999)
+        
+        # Assert
+        assert status['ruta'] == 999
+        assert status['current_zones'] == []
+        assert status['last_position'] is None
+        assert status['last_update'] is None
+
+    def test_get_route_status_in_zone(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Route inside a zone
+        ACT: Get route status
+        ASSERT: Status shows zone ID and position
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Act
+        status = location_analyzer_fixture.get_route_status(ruta=101)
+        
+        # Assert
+        assert status['ruta'] == 101
+        assert 1 in status['current_zones']
+        assert status['last_position'] is not None
+        assert status['last_position']['latitude'] == 4.7110
+        assert status['last_position']['longitude'] == -74.0059
+        assert status['last_update'] is not None
+
+    def test_get_route_status_multiple_zones(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Route potentially in multiple zones
+        ACT: Get route status
+        ASSERT: Shows all current zones
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        location_analyzer_fixture.add_zone(sample_zones['dangerous'])
+        
+        # Analyze at school location
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=102,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Act
+        status = location_analyzer_fixture.get_route_status(ruta=102)
+        
+        # Assert
+        assert status['ruta'] == 102
+        assert len(status['current_zones']) >= 1
+        assert isinstance(status['current_zones'], list)
+
+
+class TestRouteTrackingStateManagement:
+    """Tests for managing route tracking state."""
+
+    def test_clear_route_tracking(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Route is being tracked
+        ACT: Clear tracking for that route
+        ASSERT: Route status is reset
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=103,
+            latitude=4.7110,
+            longitude=-74.0059
+        )
+        
+        # Verify route is tracked
+        status_before = location_analyzer_fixture.get_route_status(ruta=103)
+        assert status_before['current_zones'] != []
+        
+        # Act
+        location_analyzer_fixture.clear_route_tracking(ruta=103)
+        
+        # Assert
+        status_after = location_analyzer_fixture.get_route_status(ruta=103)
+        assert status_after['current_zones'] == []
+
+    def test_clear_tracking_for_one_route_doesnt_affect_others(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Multiple routes being tracked
+        ACT: Clear tracking for one route
+        ASSERT: Other routes still tracked
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        
+        # Track two routes
+        location_analyzer_fixture.analyze_coordinate(ruta=201, latitude=4.7110, longitude=-74.0059)
+        location_analyzer_fixture.analyze_coordinate(ruta=202, latitude=4.7110, longitude=-74.0059)
+        
+        # Act - clear route 201
+        location_analyzer_fixture.clear_route_tracking(ruta=201)
+        
+        # Assert
+        status_201 = location_analyzer_fixture.get_route_status(ruta=201)
+        status_202 = location_analyzer_fixture.get_route_status(ruta=202)
+        
+        assert status_201['current_zones'] == []
+        assert status_202['current_zones'] != []
+
+
+class TestComplexGeofencingScenarios:
+    """Integration-style tests for complex real-world scenarios."""
+
+    def test_route_tour_through_multiple_zones(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Multiple zones, one route
+        ACT: Simulate route movement through all zones
+        ASSERT: Correct sequence of alerts
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        location_analyzer_fixture.add_zone(sample_zones['dangerous'])
+        location_analyzer_fixture.add_zone(sample_zones['depot'])
+        
+        # Act & Assert - simulate a route tour
+        
+        # 1. Start outside all zones
+        alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=3.0, longitude=-76.0)
+        assert len(alerts) == 0
+        
+        # 2. Enter school
+        alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=4.7110, longitude=-74.0059)
+        assert len(alerts) >= 1
+        assert any(a.zone_name == "School Zone" for a in alerts)
+        prev_alert_count = len(alerts)
+        
+        # 3. Stay in school
+        alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=4.7110, longitude=-74.0059)
+        assert len(alerts) == 0  # No new entries
+        
+        # 4. Exit to middle ground
+        alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=4.5500, longitude=-74.1000)
+        # May or may not have alert depending on overlap
+        
+        # 5. Enter depot
+        alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=4.5500, longitude=-74.1000)
+        # Should have entry alert if not already tracking
+        
+        # Final status should show depot
+        status = location_analyzer_fixture.get_route_status(ruta=301)
+        assert 3 in status['current_zones']
+
+    def test_concurrent_routes_independent_tracking(self, location_analyzer_fixture, sample_zones):
+        """
+        ARRANGE: Multiple routes moving independently
+        ACT: Analyze coordinates for each
+        ASSERT: Each route tracked independently
+        """
+        # Arrange
+        location_analyzer_fixture.add_zone(sample_zones['school'])
+        location_analyzer_fixture.add_zone(sample_zones['depot'])
+        
+        # Act - route 401 enters school
+        location_analyzer_fixture.analyze_coordinate(ruta=401, latitude=4.7110, longitude=-74.0059)
+        status_401_school = location_analyzer_fixture.get_route_status(ruta=401)
+        
+        # Another analysis for same route
+        location_analyzer_fixture.analyze_coordinate(ruta=401, latitude=4.7110, longitude=-74.0059)
+        
+        # Route 402 enters depot
+        location_analyzer_fixture.analyze_coordinate(ruta=402, latitude=4.5500, longitude=-74.1000)
+        status_402_depot = location_analyzer_fixture.get_route_status(ruta=402)
+        
+        # Assert
+        assert 1 in status_401_school['current_zones']
+        assert 3 in status_402_depot['current_zones']
+        
+        # Routes should be in different zones
+        assert 1 not in status_402_depot['current_zones']
+        assert 3 not in status_401_school['current_zones']

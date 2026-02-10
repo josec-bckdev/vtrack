@@ -1,0 +1,28 @@
+#!/bin/bash
+# Quick debugging scripts for test development
+
+VENV=".venv/bin/python"
+
+echo "=== VTrack Test Debugging Commands ==="
+echo ""
+echo "1. Run specific test with output:"
+echo "   $VENV -m pytest app/tests/test_message_queue.py::TestMessageQueueInitialization -v -s"
+echo ""
+echo "2. Run test class with full debug info:"
+echo "   $VENV -m pytest app/tests/test_message_queue.py::TestCoordinatePopping -v -s --tb=long --setup-show"
+echo ""
+echo "3. Run all microservices tests:"
+echo "   $VENV -m pytest app/tests/test_message_queue.py app/tests/test_location_alerts.py app/tests/test_alert_consumer.py app/tests/test_microservices_integration.py -v -s"
+echo ""
+echo "4. Run with debugger (stop on first failure):"
+echo "   $VENV -m pytest app/tests/test_message_queue.py -x --pdb"
+echo ""
+echo "5. Show which tests ran slowest:"
+echo "   $VENV -m pytest app/tests/test_message_queue.py --durations=10"
+echo ""
+echo "6. Run test matching pattern:"
+echo "   $VENV -m pytest app/tests/ -k 'push_coordinate' -v -s"
+echo ""
+echo "7. Show fixture setup/teardown:"
+echo "   $VENV -m pytest app/tests/test_message_queue.py::TestMessageQueueInitialization --setup-show -v"
+echo ""

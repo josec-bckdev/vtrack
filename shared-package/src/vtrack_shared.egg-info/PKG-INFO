@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: vtrack-shared
+Version: 0.1.0
+Summary: Shared utilities and models for vtrack microservices
+Author: Vtrack Team
+Requires-Python: >=3.10
+Requires-Dist: redis>=5.0.0
+Requires-Dist: rq>=1.13.0
+Requires-Dist: geopy>=2.3.0
+Requires-Dist: pydantic>=2.0.0
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-asyncio; extra == "dev"
+Dynamic: author
+Dynamic: requires-python

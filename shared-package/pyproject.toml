@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vtrack-shared"
+version = "0.1.0"
+description = "Shared utilities and models for vtrack microservices"
+requires-python = ">=3.10"
+dependencies = [
+    "redis>=5.0.0",
+    "rq>=1.13.0",
+    "geopy>=2.3.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]

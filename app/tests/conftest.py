@@ -27,6 +27,9 @@ from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
 
+import fakeredis
+import redis
+
 from app.main import app
 from app.database import get_db
 from app.models import Base, ScrapingResponse
@@ -333,6 +336,179 @@ def clean_collection_manager(db_session, mock_scraper_credentials):
     manager._session_cookies = None
 
     return manager
+
+
+# =============================================================================
+# REDIS AND MESSAGE QUEUE FIXTURES
+# =============================================================================
+
+@pytest.fixture(scope="function")
+def fake_redis_client():
+    """
+    Provides a fakeredis client for testing Redis operations.
+
+    Why fakeredis instead of real Redis?
+    - No external dependencies needed for tests
+    - Lightning fast (in-memory)
+    - Perfect test isolation (fresh instance per test)
+    - Same API as real Redis, so tests are realistic
+
+    fakeredis supports: strings, lists, sets, hashes, sorted sets, etc.
+    """
+    # Create a fresh fakeredis instance for this test
+    client = fakeredis.FakeStrictRedis(decode_responses=True)
+    yield client
+    # Cleanup: flush all data
+    client.flushall()
+
+
+@pytest.fixture(scope="function")
+def redis_url_test(monkeypatch, fake_redis_client):
+    """
+    Configures the test to use fakeredis instead of real Redis.
+
+    This fixture:
+    1. Patches the REDIS_URL to point to our fake client
+    2. Makes all code using Redis use fakeredis automatically
+    3. Provides test isolation
+    """
+    # Monkeypatch redis.from_url to return our fake client
+    def mock_from_url(url, decode_responses=True):
+        return fake_redis_client
+    
+    monkeypatch.setattr("redis.from_url", mock_from_url)
+    
+    return "redis://localhost:6379/0"
+
+
+@pytest.fixture(scope="function")
+def message_queue_fixture(fake_redis_client):
+    """
+    Provides a fresh MessageQueue instance for testing.
+
+    Why pass the fake_redis_client?
+    - Ensures the queue uses our test Redis, not production
+    - Allows us to inspect/manipulate the queue in tests
+    - Maintains test isolation
+    """
+    from shared.message_queue import MessageQueue
+    from unittest.mock import MagicMock, patch
+    from rq import Queue
+    
+    # Create queue with patched connection to avoid real Redis ping
+    with patch('redis.from_url') as mock_redis:
+        # Use our fake redis client
+        mock_redis.return_value = fake_redis_client
+        queue = MessageQueue("redis://localhost:6379/0")
+    
+    return queue
+
+
+@pytest.fixture(scope="function")
+def location_analyzer_fixture():
+    """
+    Provides a fresh LocationAnalyzer instance for testing.
+
+    The LocationAnalyzer initializes with default zones:
+    - School Zone
+    - Dangerous Area
+    - Route Depot
+
+    Why fresh instance?
+    - Tests shouldn't share state
+    - Tracking state persists across calls, so fresh instance ensures isolation
+    """
+    from shared.location_alerts import LocationAnalyzer
+    
+    analyzer = LocationAnalyzer()
+    return analyzer
+
+
+@pytest.fixture(scope="function")
+def sample_zones():
+    """
+    Provides sample geofence zones for testing.
+
+    These represent real-world zones where we want to track routes.
+    """
+    from shared.location_alerts import Zone, AlertType, AlertSeverity
+    
+    return {
+        'school': Zone(
+            zone_id=1,
+            name="Test School",
+            latitude=4.7110,
+            longitude=-74.0059,
+            radius_meters=500,
+            alert_type=AlertType.GEOFENCE_ENTRY,
+            severity=AlertSeverity.INFO,
+            enabled=True
+        ),
+        'dangerous': Zone(
+            zone_id=2,
+            name="Test Dangerous Area",
+            latitude=4.6289,
+            longitude=-74.0832,
+            radius_meters=1000,
+            alert_type=AlertType.GEOFENCE_ENTRY,
+            severity=AlertSeverity.CRITICAL,
+            enabled=True
+        ),
+        'depot': Zone(
+            zone_id=3,
+            name="Test Depot",
+            latitude=4.5500,
+            longitude=-74.1000,
+            radius_meters=750,
+            alert_type=AlertType.GEOFENCE_EXIT,
+            severity=AlertSeverity.WARNING,
+            enabled=True
+        ),
+    }
+
+
+@pytest.fixture(scope="function")
+def coordinate_data_fixtures():
+    """
+    Provides sample coordinate data at various locations.
+
+    These coordinates are strategically placed to test:
+    - Inside zones (should trigger alerts)
+    - Outside zones (should not trigger alerts)
+    - Zone boundaries
+    """
+    return {
+        # Inside School Zone (4.7110, -74.0059, 500m radius)
+        'inside_school': {
+            'ruta': 101,
+            'latitude': 4.7110,
+            'longitude': -74.0059,
+        },
+        # Near but outside School Zone
+        'near_school': {
+            'ruta': 101,
+            'latitude': 4.7130,
+            'longitude': -74.0059,
+        },
+        # Inside Dangerous Area (4.6289, -74.0832, 1000m radius)
+        'inside_dangerous': {
+            'ruta': 102,
+            'latitude': 4.6289,
+            'longitude': -74.0832,
+        },
+        # Outside all zones
+        'outside_all': {
+            'ruta': 103,
+            'latitude': 3.4000,
+            'longitude': -76.5000,
+        },
+        # Inside Depot (4.5500, -74.1000, 750m radius)
+        'inside_depot': {
+            'ruta': 104,
+            'latitude': 4.5500,
+            'longitude': -74.1000,
+        },
+    }
 
 
 # =============================================================================

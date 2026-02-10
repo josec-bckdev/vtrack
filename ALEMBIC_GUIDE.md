@@ -11,7 +11,7 @@ Alembic is now configured for managing database schema changes in VTRACK. This g
 Alembic has been configured with:
 
 1. **[alembic.ini](alembic.ini)** - Main configuration file
-   - Database URL: `postgresql://user:password@db:5432/app_db` (default)
+   - Database URL: `postgresql://user:password@localhost/dbname` (default-placeholder)
    - Override with `DATABASE_URL` environment variable
 
 2. **[alembic/env.py](alembic/env.py)** - Migration environment
@@ -19,7 +19,7 @@ Alembic has been configured with:
    - Uses `DATABASE_URL` environment variable if available
    - Supports both online and offline migration modes
 
-3. **First Migration Created**: [alembic/versions/4906ead73111_make_timestamp_fields_nullable.py](alembic/versions/4906ead73111_make_timestamp_fields_nullable.py)
+3. **First Migration Created**: [alembic/versions/ab927e2e840d_initial_migration.py](alembic/versions/ab927e2e840d_initial_migration.py)
    - Makes `position_ts` nullable
    - Makes `route_status_ts` nullable
    - Makes `student_status_ts` nullable
@@ -48,10 +48,9 @@ psycopg2-binary
 #### 2. [docker-compose.yml](docker-compose.yml)
 ```diff
 volumes:
-  - ./app:/app/app
-  - ./requirements.txt:/app/requirements.txt
-+ - ./alembic:/app/alembic  # Mount alembic migrations
-+ - ./alembic.ini:/app/alembic.ini  # Mount alembic config
++ - ./alembic.ini:/app/alembic.ini:ro
++  - ./alembic:/app/alembic:ro
+  - ./app:/app/app:ro
 ```
 
 **Why mount these files?**
@@ -74,15 +73,6 @@ COPY app/ /app/app/
 - Makes the image self-contained
 
 ### Environment Variables
-
-Your Docker setup already has the necessary environment variables:
-
-```yaml
-# From docker-compose.yml
-environment:
-  DATABASE_URL: ${DATABASE_URL}  # Used by Alembic
-  PYTHONPATH: /app               # Ensures app.models is importable
-```
 
 The `DATABASE_URL` from your `.env` file is automatically used by Alembic through the configuration in [alembic/env.py](alembic/env.py).
 
@@ -394,6 +384,70 @@ alembic upgrade head
   ```
 - Then run: `alembic upgrade head`
 
+### Error: `psycopg2.errors.DuplicateTable: relation "route_data" already exists`
+
+**Problem:** After running `docker-compose down` and then `docker-compose up`, the migration fails because:
+- The database volume persists (containers/services stop, but data remains)
+- Alembic's version history table (`alembic_version`) is out of sync with the actual database
+- When migrations try to re-run, they attempt to create tables that already exist
+
+**When This Happens:**
+```
+migrate_job | Running upgrade ab927e2e840d -> c3f9a4b2e6f7, Create initial tables
+migrate_job | sqlalchemy.exc.ProgrammingError: (psycopg2.errors.DuplicateTable) 
+             relation "route_data" already exists
+```
+
+**Solutions:**
+
+**Option 1: Quick Fix (Recommended for Development)**
+Stamp the database to match the current head revision without re-running migrations:
+```bash
+# Mark the database as being at the latest migration version
+docker-compose run --rm migrate alembic stamp head
+
+# Then restart the migration service
+docker-compose up -d migrate
+```
+
+**Option 2: Clean Slate (Destructive)**
+If you want to start fresh with a clean database:
+```bash
+# Remove all containers, volumes, and data
+docker-compose down -v
+
+# Recreate everything from scratch
+docker-compose up -d
+
+# Data in the database will be gone, but migrations will apply cleanly
+```
+
+**Option 3: Keep Data But Reset Alembic**
+If you want to keep existing data but reset the migration history:
+```bash
+# Connect to the database
+docker-compose exec db psql -U user -d app_db
+
+# Inside psql, reset the alembic version table:
+\c app_db
+DELETE FROM alembic_version;
+\q
+
+# Then stamp to the current head
+docker-compose run --rm migrate alembic stamp head
+```
+
+**Why This Happens:**
+- The `docker-compose.yml` uses named volumes by default, so data persists across container restarts
+- Alembic tracks which migrations have been applied in the `alembic_version` table
+- If the database has tables but the `alembic_version` table doesn't reflect this, Alembic tries to re-apply migrations
+- This causes "already exists" errors for tables that are already there
+
+**Prevention Tips:**
+- Use `docker-compose down -v` to remove volumes if doing a full reset
+- Use `alembic stamp head` after major database changes to sync Alembic's tracking
+- Keep database backups before running migrations
+
 ---
 
 ## 📚 Best Practices
@@ -566,6 +620,6 @@ docker-compose exec api env | grep DATABASE_URL
 ---
 
 **Last Updated:** 2026-02-05
-**Migration Version:** 4906ead73111
+**Migration Version:** ab927e2e840d
 **Status:** ✅ Ready to apply
 **Container Name:** `fastapi_api`

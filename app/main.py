@@ -8,6 +8,8 @@ from app.database import init_db
 from .data_server import router as data_server_router
 from app.scraper_async import collection_manager
 from app.models import CollectionStatusResponse, CollectionStatusEnum
+from shared.message_queue import MessageQueue
+import os
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +29,7 @@ class Scheduler:
         self.collection_manager = manager
 
     async def start_scheduler(self):
-        """Start the scheduler to run collection at 6 AM and 3:15 PM daily."""
+        """Start the scheduler to run collection at 5:45 AM and 3:15 PM daily."""
         if self.is_running:
             logger.info("Scheduler is already running")
             return
@@ -43,7 +45,7 @@ class Scheduler:
         self.morning_task = asyncio.create_task(self._schedule_morning_collection())
         self.afternoon_task = asyncio.create_task(self._schedule_afternoon_collection())
         
-        logger.info("Collection scheduler started - will run at 6:00 AM and 3:15 PM daily")
+        logger.info("Collection scheduler started - will run at 5:45 AM and 3:15 PM daily")
 
     async def stop_scheduler(self):
         """Stop all scheduled tasks."""
@@ -60,10 +62,10 @@ class Scheduler:
         logger.info("Collection scheduler stopped")
 
     async def _schedule_morning_collection(self):
-        """Schedule collection to start at 6:00 AM daily."""
+        """Schedule collection to start at 5:45 AM daily."""
         while self.is_running:
             now = datetime.now(ZoneInfo("America/Bogota"))
-            target_time = time(6, 0, 0)  # 6:00 AM
+            target_time = time(5, 45, 0)  # 5:45 AM
             
             # Calculate next run time
             next_run = datetime.combine(now.date(), target_time).replace(tzinfo=ZoneInfo("America/Bogota"))
@@ -118,6 +120,17 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     init_db()
+    
+    # Initialize Redis message queue
+    try:
+        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        message_queue = MessageQueue(redis_url)
+        collection_manager.message_queue = message_queue
+        logger.info("Redis message queue initialized successfully")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Redis message queue: {e}. Running without messaging.")
+        message_queue = None
+    
     scheduler.set_collection_manager(collection_manager)
     await scheduler.start_scheduler()
     logger.info("FastAPI application startup complete - scheduler running")
@@ -134,6 +147,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(data_server_router, prefix="/data", tags=["data"])
+
+
+@app.get("/health")
+async def health():
+    """Simple health endpoint for load balancers and checks."""
+    return {"status": "ok"}
 
 @app.post("/fetch-remote-data")
 async def fetch_data_from_remote_service():
