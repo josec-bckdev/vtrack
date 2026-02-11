@@ -346,8 +346,8 @@ These can be kept for reference or removed if no longer needed.
 
 1. ✅ Review the new structure
 2. ✅ Test with `./scripts/microservices.sh start`
-3. ✅ Read [MICROSERVICES_GUIDE.md](./MICROSERVICES_GUIDE.md)
-4. ✅ Review [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for production
+3. ✅ Read [MICROSERVICES_GUIDE.md](../architecture/microservices.md)
+4. ✅ Review [DEPLOYMENT_GUIDE.md](../guides/deployment.md) for production
 5. Deploy to your environment
 
 ## Support Resources

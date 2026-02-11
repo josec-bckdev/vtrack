@@ -190,19 +190,91 @@ PGAdmin ─────┘
 
 ## Important Notes
 
-### Old Files (Now Using Shared Package)
-The following files in `app/` are deprecated in favor of the shared package:
-- ~~`app/message_queue.py`~~ → Use `shared.message_queue`
-- ~~`app/location_alerts.py`~~ → Use `shared.location_alerts`
-- ~~`app/alert_consumer.py`~~ → Use `microservices/alert-processor`
+### Old Files Removed (Now Using Shared Package)
+The following files have been removed from `app/` in favor of the shared package:
+- ~~`app/message_queue.py`~~ → **Removed** (use `shared.message_queue`)
+- ~~`app/location_alerts.py`~~ → **Removed** (use `shared.location_alerts`)
+- ~~`app/alert_consumer.py`~~ → **Removed** (use `microservices/alert-processor`)
 
-You can remove these files or keep them for backwards compatibility.
+All services now import from the `shared-package` for consistency.
 
 ### Backwards Compatibility
 The system is fully backwards compatible:
 - Existing API endpoints work unchanged
 - Database schema is unchanged
 - All existing data is preserved
+
+## Development Tools & Monitoring
+
+### Real-Time Queue Monitoring
+```bash
+# Visual monitor with auto-refresh
+python redis_monitor.py --interval 1
+
+# Shows:
+# - Queue lengths
+# - Memory usage
+# - Preview of coordinates and alerts
+# - Color-coded severity levels
+```
+
+### Testing Alert Processor
+```bash
+# Test geofence entry
+python test_alert_processor.py --scenario zone
+
+# Test batch processing
+python test_alert_processor.py --scenario batch
+
+# Load test
+python test_alert_processor.py --load 100
+```
+
+### Hot Reload Development
+```bash
+# Start with development overrides (code mounted as volumes)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# Make code changes
+vim microservices/alert-processor/main.py
+
+# Just restart (no rebuild needed!)
+docker restart alert_processor
+```
+
+### Redis Queue Inspection
+```bash
+# Connect to Redis CLI
+docker exec -it redis_queue redis-cli
+
+# Check queue lengths
+LLEN coordinate_queue
+LLEN alert_queue
+
+# Peek at queue contents
+LRANGE coordinate_queue 0 9
+
+# Monitor all Redis commands in real-time
+MONITOR
+```
+
+### Alert Processor Management
+```bash
+# Restart independently (FastAPI keeps running)
+docker restart alert_processor
+
+# Stop for development
+docker stop alert_processor
+
+# Rebuild after code changes
+docker-compose build alert-processor && docker-compose up -d alert_processor
+
+# View logs
+docker logs -f alert_processor
+
+# Scale up consumers
+docker-compose up -d --scale alert-processor=3
+```
 
 ## Next Steps
 
@@ -252,10 +324,23 @@ docker exec db psql -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT 1"
 
 ## Documentation References
 
-- **[MICROSERVICES_GUIDE.md](./MICROSERVICES_GUIDE.md)** - Detailed architecture guide
-- **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Production deployment instructions
-- **[TESTING_GUIDE.md](./TESTING_GUIDE.md)** - Testing procedures
-- **[Makefile](./Makefile)** - Common commands
+### Core Documentation
+- **[MICROSERVICES_GUIDE.md](microservices.md)** - Complete architecture and technical details
+- **[DEPLOYMENT_GUIDE.md](../guides/deployment.md)** - Production deployment instructions
+
+### Redis Queue System
+- **[REDIS_QUEUE_GUIDE.md](../guides/redis/queue-guide.md)** - How Redis queues work, where data is stored, monitoring
+- **[REDIS_QUICK_REFERENCE.md](../guides/redis/quick-reference.md)** - Quick command reference and common scenarios
+
+### Alert Processor Development
+- **[ALERT_PROCESSOR_GUIDE.md](../guides/alert-processor.md)** - How the consumer works, restart procedures
+- **[DEV_WORKFLOW.md](../guides/development/workflow.md)** - Development workflows, hot reload, testing strategies
+- **[ARCHITECTURE_OVERVIEW.md](overview.md)** - Complete visual architecture guide
+
+### Development Tools
+- **[redis_monitor.py](./redis_monitor.py)** - Real-time queue monitoring tool
+- **[test_alert_processor.py](./test_alert_processor.py)** - Testing tool for alert processor
+- **[docker-compose.dev.yml](./docker-compose.dev.yml)** - Development overrides for hot reload
 
 ## Support for Microservices Features
 
@@ -290,8 +375,8 @@ docker exec db psql -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT 1"
 ## Questions or Issues?
 
 Refer to:
-1. [MICROSERVICES_GUIDE.md](./MICROSERVICES_GUIDE.md) for architecture details
-2. [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for deployment help
+1. [MICROSERVICES_GUIDE.md](microservices.md) for architecture details
+2. [DEPLOYMENT_GUIDE.md](../guides/deployment.md) for deployment help
 3. Service logs: `./scripts/microservices.sh logs [service-name]`
 4. Health check: `./scripts/microservices.sh health`
 

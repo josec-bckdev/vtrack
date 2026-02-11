@@ -389,7 +389,7 @@ pydantic >= 2.0.0
 
 ## Related Documentation
 
-- [MICROSERVICES_GUIDE.md](MICROSERVICES_GUIDE.md) - Architecture overview
-- [TESTING_GUIDE.md](TESTING_GUIDE.md) - General testing conventions
-- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - Production deployment
+- [MICROSERVICES_GUIDE.md](../architecture/microservices.md) - Architecture overview
+- [TESTING_GUIDE.md](../testing/guide.md) - General testing conventions
+- [DEPLOYMENT_GUIDE.md](../guides/deployment.md) - Production deployment
 

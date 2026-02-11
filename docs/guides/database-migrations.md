@@ -503,7 +503,7 @@ git commit -m "Add migration: add new field"
 - **[alembic/env.py](alembic/env.py)** - Migration environment setup
 - **[app/models.py](app/models.py)** - SQLAlchemy models (source of truth)
 - **[app/database.py](app/database.py)** - Database connection setup
-- **[TEST_SUITE_SUMMARY.md](TEST_SUITE_SUMMARY.md)** - Testing documentation
+- **[TEST_SUITE_SUMMARY.md](../archive/test-suite-summary.md)** - Testing documentation
 
 ---
 

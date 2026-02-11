@@ -69,9 +69,9 @@
 
 5. **[pytest.ini](pytest.ini)** - Pytest configuration with async support
 6. **[requirements.txt](requirements.txt)** - Updated with pytest, pytest-asyncio, pytest-cov
-7. **[TESTING_ROADMAP.md](TESTING_ROADMAP.md)** - Strategic testing plan
-8. **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Comprehensive testing guide
-9. **[TEST_COMMANDS.md](TEST_COMMANDS.md)** - Quick command reference
+7. **[TESTING_ROADMAP.md](testing-roadmap.md)** - Strategic testing plan
+8. **[TESTING_GUIDE.md](../testing/guide.md)** - Comprehensive testing guide
+9. **[TEST_COMMANDS.md](../testing/commands.md)** - Quick command reference
 
 ---
 
@@ -470,9 +470,9 @@ When adding new features to VTRACK:
 
 ## 📞 Documentation Reference
 
-- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Comprehensive testing guide with examples
-- **[TESTING_ROADMAP.md](TESTING_ROADMAP.md)** - Strategic testing plan and phases
-- **[TEST_COMMANDS.md](TEST_COMMANDS.md)** - Quick command reference
+- **[TESTING_GUIDE.md](../testing/guide.md)** - Comprehensive testing guide with examples
+- **[TESTING_ROADMAP.md](testing-roadmap.md)** - Strategic testing plan and phases
+- **[TEST_COMMANDS.md](../testing/commands.md)** - Quick command reference
 - **[pytest.ini](pytest.ini)** - Pytest configuration settings
 - **[conftest.py](app/tests/conftest.py)** - Test fixtures and setup
 
