@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from shared.message_queue import MessageQueue
 from shared.location_alerts import LocationAnalyzer, LocationAlert
 
+POLL_INTERVAL_SECONDS = 7  # Time to wait between queue checks
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -49,7 +51,7 @@ class AlertConsumer:
         
         logger.info(f"Alert Consumer initialized with Redis URL: {self.redis_url}")
     
-    def start(self, poll_interval: int = 1):
+    def start(self, poll_interval: int = POLL_INTERVAL_SECONDS):
         """
         Start the consumer service.
         

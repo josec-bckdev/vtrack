@@ -1,0 +1,56 @@
+zones:
+  - zone_id: 1
+    name: "Cota-conejera"
+    latitude: 4.767916
+    longitude: -74.07654149999999
+    radius_meters: 1500
+    alert_type: "GEOFENCE_EXIT"
+    severity: "WARNING"
+    
+  - zone_id: 2
+    name: "Boyaca"
+    latitude: 4.742
+    longitude: -74.065845
+    radius_meters: 1600
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 3
+    name: "Prado"
+    latitude: 4.7186734999999995
+    longitude: -74.062382
+    radius_meters: 1200
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 4
+    name: "Batan"
+    latitude: 4.705053
+    longitude: -74.054543
+    radius_meters: 600
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 5
+    name: "Av 116 - Cr 53"
+    latitude: 4.702032
+    longitude: -74.061327
+    radius_meters: 220
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 6
+    name: "Calle 115 - Cr 54"
+    latitude: 4.699599
+    longitude: -74.063802
+    radius_meters: 185
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 7
+    name: "Casita"
+    latitude: 4.699
+    longitude: -74.060312
+    radius_meters: 70
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
