@@ -58,6 +58,42 @@ services-rebuild: ## Clean rebuild all microservice images
 services-clean: ## Remove all containers and volumes (DESTRUCTIVE)
 	./scripts/microservices.sh clean
 
+##@ Development Mode (Hot-Reload)
+dev-up: ## Start services with dev overrides (hot-reload enabled)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+dev-down: ## Stop dev mode services
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+
+dev-start: dev-up ## Alias for dev-up
+
+dev-restart: ## Restart services in dev mode
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
+
+dev-restart-api: ## Restart only API in dev mode
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart api
+
+dev-restart-alert: ## Restart only alert-processor in dev mode
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart alert-processor
+
+dev-build: ## Build images for dev mode
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+
+dev-rebuild: ## Rebuild images in dev mode (no cache)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
+
+dev-logs: ## Show logs in dev mode
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
+
+dev-logs-api: ## Show API logs in dev mode
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api
+
+dev-logs-alert: ## Show alert-processor logs in dev mode
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f alert-processor
+
+dev-status: ## Show dev mode service status
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
+
 ##@ Database & Migrations
 migrate: ## Run database migrations (upgrade to head)
 	./scripts/migrate.sh upgrade

@@ -1,0 +1,42 @@
+# Docker Compose Development Override
+# This file enables hot-reloading for faster development
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Or create an alias:
+#   alias dcdev='docker-compose -f docker-compose.yml -f docker-compose.dev.yml'
+#   dcdev up -d
+#   dcdev restart alert-processor
+#
+
+services:
+  # Enable code mounting for alert-processor (faster development)
+  alert-processor:
+    volumes:
+      # Mount source code directly - changes are visible immediately
+      - ./microservices/alert-processor:/app
+      - ./shared-package:/app/shared-package
+
+    # Override command to ensure unbuffered output
+    command: python -u main.py
+
+    # Optional: Add environment variable for debug mode
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      PYTHONUNBUFFERED: 1
+      DEBUG: "true"
+
+    # Remove restart policy during development (easier to debug crashes)
+    restart: "no"
+
+  # Optional: Enable code mounting for main API too
+  # (Already has volumes in main docker-compose.yml)
+  api:
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
+      SCRAPER_EMAIL: ${LOGIN_EMAIL}
+      SCRAPER_PASSWORD: ${LOGIN_PASSWORD}
+      PYTHONPATH: /app
+      DEBUG: "true"
