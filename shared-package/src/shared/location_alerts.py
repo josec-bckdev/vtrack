@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import os
+import yaml
 
 from geopy.distance import geodesic
 
@@ -83,39 +85,38 @@ class LocationAnalyzer:
     
     def _initialize_default_zones(self):
         """
-        Initialize default safety and monitoring zones.
-        These can be customized or loaded from database later.
+        Initialize zones from YAML configuration file.
         """
-        # Example zones - customize based on your needs
-        self.zones = [
-            Zone(
-                zone_id=1,
-                name="School Zone",
-                latitude=4.7110,  # Bogotá, Colombia
-                longitude=-74.0059,
-                radius_meters=500,
-                alert_type=AlertType.GEOFENCE_ENTRY,
-                severity=AlertSeverity.INFO
-            ),
-            Zone(
-                zone_id=2,
-                name="Dangerous Area",
-                latitude=4.6289,
-                longitude=-74.0832,
-                radius_meters=1000,
-                alert_type=AlertType.GEOFENCE_ENTRY,
-                severity=AlertSeverity.CRITICAL
-            ),
-            Zone(
-                zone_id=3,
-                name="Route Depot",
-                latitude=4.5500,
-                longitude=-74.1000,
-                radius_meters=750,
-                alert_type=AlertType.GEOFENCE_EXIT,
-                severity=AlertSeverity.WARNING
-            ),
-        ]
+        zones_file = os.path.join(
+            os.path.dirname(__file__),
+            'zones.yaml'
+        )
+        
+        if os.path.exists(zones_file):
+            try:
+                with open(zones_file, 'r') as f:
+                    config = yaml.safe_load(f)
+                    
+                if config and 'zones' in config:
+                    for zone_data in config['zones']:
+                        zone = Zone(
+                            zone_id=zone_data['zone_id'],
+                            name=zone_data['name'],
+                            latitude=zone_data['latitude'],
+                            longitude=zone_data['longitude'],
+                            radius_meters=zone_data['radius_meters'],
+                            alert_type=AlertType(zone_data.get('alert_type', 'GEOFENCE_ENTRY')),
+                            severity=AlertSeverity(zone_data.get('severity', 'WARNING')),
+                            enabled=zone_data.get('enabled', True)
+                        )
+                        self.zones.append(zone)
+                    logger.info(f"Loaded {len(self.zones)} zones from configuration")
+                else:
+                    logger.warning("No zones found in configuration file")
+            except Exception as e:
+                logger.error(f"Error loading zones from YAML file: {e}")
+        else:
+            logger.warning(f"Zones configuration file not found at {zones_file}")
     
     def add_zone(self, zone: Zone) -> bool:
         """

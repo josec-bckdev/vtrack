@@ -19,6 +19,7 @@ beautifulsoup4
 
 # Geolocation and Alerts
 geopy
+pyyaml
 
 # Testing
 pytest>=8.0.0
