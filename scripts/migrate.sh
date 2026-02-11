@@ -16,9 +16,9 @@ CONTAINER_NAME="fastapi_api"
 
 # Helper function to check if container is running
 check_container() {
-    if ! docker-compose ps | grep -q "$CONTAINER_NAME.*Up"; then
+    if ! docker compose ps | grep -q "$CONTAINER_NAME.*Up"; then
         echo -e "${RED}Error: Container '$CONTAINER_NAME' is not running${NC}"
-        echo "Start it with: docker-compose up -d api"
+        echo "Start it with: docker compose up -d api"
         exit 1
     fi
 }
@@ -65,14 +65,14 @@ EOF
 get_current() {
     print_header "Current Migration Version"
     check_container
-    docker-compose exec api alembic current
+    docker compose exec api alembic current
 }
 
 # Show migration history
 show_history() {
     print_header "Migration History"
     check_container
-    docker-compose exec api alembic history --verbose
+    docker compose exec api alembic history --verbose
 }
 
 # Apply migrations
@@ -81,19 +81,19 @@ upgrade() {
     check_container
 
     echo -e "${YELLOW}Current version:${NC}"
-    docker-compose exec api alembic current
+    docker compose exec api alembic current
     echo ""
 
     echo -e "${YELLOW}Upgrading to latest...${NC}"
-    docker-compose exec api alembic upgrade head
+    docker compose exec api alembic upgrade head
     echo ""
 
     echo -e "${GREEN}✓ Migration complete!${NC}"
     echo -e "${YELLOW}New version:${NC}"
-    docker-compose exec api alembic current
+    docker compose exec api alembic current
 
     echo -e "\n${YELLOW}Restarting API to apply changes...${NC}"
-    docker-compose restart api
+    docker compose restart api
     echo -e "${GREEN}✓ API restarted${NC}"
 }
 
@@ -103,7 +103,7 @@ downgrade() {
     check_container
 
     echo -e "${YELLOW}Current version:${NC}"
-    docker-compose exec api alembic current
+    docker compose exec api alembic current
     echo ""
 
     echo -e "${RED}⚠️  This will rollback ONE migration${NC}"
@@ -113,11 +113,11 @@ downgrade() {
         exit 0
     fi
 
-    docker-compose exec api alembic downgrade -1
+    docker compose exec api alembic downgrade -1
 
     echo -e "\n${GREEN}✓ Rollback complete!${NC}"
     echo -e "${YELLOW}New version:${NC}"
-    docker-compose exec api alembic current
+    docker compose exec api alembic current
 }
 
 # Create new migration
@@ -132,7 +132,7 @@ create_migration() {
     fi
 
     echo -e "${YELLOW}Creating migration: $1${NC}"
-    docker-compose exec api alembic revision --autogenerate -m "$1"
+    docker compose exec api alembic revision --autogenerate -m "$1"
 
     echo -e "\n${GREEN}✓ Migration created!${NC}"
     echo -e "${YELLOW}Remember to review the generated file in alembic/versions/${NC}"
@@ -144,19 +144,19 @@ show_status() {
     check_container
 
     echo -e "${YELLOW}Container Status:${NC}"
-    docker-compose ps api
+    docker compose ps api
     echo ""
 
     echo -e "${YELLOW}Current Migration:${NC}"
-    docker-compose exec api alembic current
+    docker compose exec api alembic current
     echo ""
 
     echo -e "${YELLOW}Migration History (last 5):${NC}"
-    docker-compose exec api alembic history -r-5:
+    docker compose exec api alembic history -r-5:
     echo ""
 
     echo -e "${YELLOW}Database Connection:${NC}"
-    docker-compose exec api python -c "import os; print(f'DATABASE_URL: {os.environ.get(\"DATABASE_URL\", \"NOT SET\")}')"
+    docker compose exec api python -c "import os; print(f'DATABASE_URL: {os.environ.get(\"DATABASE_URL\", \"NOT SET\")}')"
 }
 
 # Backup database
@@ -174,8 +174,8 @@ backup_database() {
 
     echo -e "${YELLOW}Creating backup: $BACKUP_FILE${NC}"
 
-    # Use docker-compose exec to run pg_dump
-    docker-compose exec -T db pg_dump -U user app_db > "$BACKUP_FILE"
+    # Use docker compose exec to run pg_dump
+    docker compose exec -T db pg_dump -U user app_db > "$BACKUP_FILE"
 
     if [ -f "$BACKUP_FILE" ]; then
         BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)

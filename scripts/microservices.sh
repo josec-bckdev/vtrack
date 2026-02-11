@@ -72,7 +72,7 @@ EOF
 # Function to start services
 start_services() {
     print_header "Starting VTrack Microservices"
-    docker-compose up -d
+    docker compose up -d
     print_success "Services started"
     
     # Wait for services to be ready
@@ -85,14 +85,14 @@ start_services() {
 # Function to stop services
 stop_services() {
     print_header "Stopping VTrack Microservices"
-    docker-compose down
+    docker compose down
     print_success "Services stopped"
 }
 
 # Function to restart services
 restart_services() {
     print_header "Restarting VTrack Microservices"
-    docker-compose restart
+    docker compose restart
     print_success "Services restarted"
 }
 
@@ -100,30 +100,30 @@ restart_services() {
 show_logs() {
     if [ -z "$1" ]; then
         print_header "Showing logs for all services (press Ctrl+C to exit)"
-        docker-compose logs -f
+        docker compose logs -f
     else
         print_header "Showing logs for service: $1"
-        docker-compose logs -f "$1"
+        docker compose logs -f "$1"
     fi
 }
 
 # Function to show status
 show_status() {
     print_header "Service Status"
-    docker-compose ps
+    docker compose ps
 }
 
 # Function to build images
 build_images() {
     print_header "Building microservice images"
-    docker-compose build
+    docker compose build
     print_success "Images built successfully"
 }
 
 # Function to rebuild images
 rebuild_images() {
     print_header "Rebuilding microservice images (clean)"
-    docker-compose build --no-cache
+    docker compose build --no-cache
     print_success "Images rebuilt successfully"
 }
 
@@ -137,7 +137,7 @@ scale_alerts() {
     print_header "Scaling alert-processor to $1 instances"
     # Note: Docker Compose doesn't support scaling in the same way as Docker Swarm
     # This is a note for future implementation
-    print_warning "Note: Docker Compose scaling requires docker-compose up -d --scale alert-processor=$1"
+    print_warning "Note: Docker Compose scaling requires docker compose up -d --scale alert-processor=$1"
     print_warning "Manual scaling is recommended for microservices architecture"
     exit 1
 }
@@ -228,7 +228,7 @@ clean_system() {
         exit 0
     fi
     
-    docker-compose down -v
+    docker compose down -v
     print_success "System cleaned"
 }
 

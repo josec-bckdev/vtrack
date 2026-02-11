@@ -15,140 +15,140 @@ help: ## Display this help message
 
 ##@ Docker & Services
 build: ## Build the API Docker image (no cache)
-	docker compose build api --no-cache
+	cd .. && docker compose build api --no-cache
 
 up: ## Start all services in background
-	docker compose up -d
+	cd .. && docker compose up -d
 
 down: ## Stop and remove all containers
-	docker compose down
+	cd .. && docker compose down
 
 rebuild: down build up ## Rebuild API image and restart services
 
 services-start: ## Start all microservices
-	./scripts/microservices.sh start
+	./microservices.sh start
 
 services-stop: ## Stop all microservices
-	./scripts/microservices.sh stop
+	./microservices.sh stop
 
 services-restart: ## Restart all microservices
-	./scripts/microservices.sh restart
+	./microservices.sh restart
 
 services-status: ## Show status of all services
-	./scripts/microservices.sh status
+	./microservices.sh status
 
 services-health: ## Check health of all services
-	./scripts/microservices.sh health
+	./microservices.sh health
 
 services-logs: ## Show logs for all services (Ctrl+C to exit)
-	./scripts/microservices.sh logs
+	./microservices.sh logs
 
 api-logs: ## Show logs for API service only
-	./scripts/microservices.sh logs api
+	./microservices.sh logs api
 
 alert-logs: ## Show logs for alert processor
-	./scripts/microservices.sh logs alert-processor
+	./microservices.sh logs alert-processor
 
 services-build: ## Build all microservice images
-	./scripts/microservices.sh build
+	./microservices.sh build
 
 services-rebuild: ## Clean rebuild all microservice images
-	./scripts/microservices.sh rebuild
+	./microservices.sh rebuild
 
 services-clean: ## Remove all containers and volumes (DESTRUCTIVE)
-	./scripts/microservices.sh clean
+	./microservices.sh clean
 
 ##@ Development Mode (Hot-Reload)
 dev-up: ## Start services with dev overrides (hot-reload enabled)
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 dev-down: ## Stop dev mode services
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 
 dev-start: dev-up ## Alias for dev-up
 
 dev-restart: ## Restart services in dev mode
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
 
 dev-restart-api: ## Restart only API in dev mode
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart api
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml restart api
 
 dev-restart-alert: ## Restart only alert-processor in dev mode
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart alert-processor
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml restart alert-processor
 
 dev-build: ## Build images for dev mode
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml build
 
 dev-rebuild: ## Rebuild images in dev mode (no cache)
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
 
 dev-logs: ## Show logs in dev mode
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
 
 dev-logs-api: ## Show API logs in dev mode
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api
 
 dev-logs-alert: ## Show alert-processor logs in dev mode
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f alert-processor
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f alert-processor
 
 dev-status: ## Show dev mode service status
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
+	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
 
 ##@ Database & Migrations
 migrate: ## Run database migrations (upgrade to head)
-	./scripts/migrate.sh upgrade
+	./migrate.sh upgrade
 
 migrate-run: ## Run alembic upgrade head inside api container
-	docker compose exec api alembic upgrade head
+	cd .. && docker compose exec api alembic upgrade head
 
 migrate-current: ## Show current migration version
-	./scripts/migrate.sh current
+	./migrate.sh current
 
 migrate-history: ## Show migration history
-	./scripts/migrate.sh history
+	./migrate.sh history
 
 migrate-status: ## Show detailed migration status
-	./scripts/migrate.sh status
+	./migrate.sh status
 
 migrate-create: ## Create new migration (usage: make migrate-create m="description")
 	@if [ -z "$(m)" ]; then \
 		echo "Please provide a message: make migrate-create m=\"Your message\""; exit 1; \
 	fi
-	./scripts/migrate.sh create "$(m)"
+	./migrate.sh create "$(m)"
 
 migrate-downgrade: ## Rollback one migration (DESTRUCTIVE)
-	./scripts/migrate.sh downgrade
+	./migrate.sh downgrade
 
 migrate-backup: ## Backup database before migration
-	./scripts/migrate.sh backup
+	./migrate.sh backup
 
 revision: migrate-create ## Alias for migrate-create
 
 current: migrate-current ## Alias for migrate-current
 
 db-shell: ## Open psql shell to the database
-	docker compose exec db psql -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+	cd .. && docker compose exec db psql -U $${POSTGRES_USER} -d $${POSTGRES_DB}
 
 ##@ Monitoring & Queue Management
 redis-monitor: ## Monitor Redis queues in real-time
-	python ./scripts/redis_monitor.py
+	python ./redis_monitor.py
 
 queue-stats: ## Show Redis queue statistics
-	./scripts/microservices.sh queue-stats
+	./microservices.sh queue-stats
 
 logs: ## Follow API container logs
-	docker compose logs -f api
+	cd .. && docker compose logs -f api
 
 ##@ Testing & Debugging
 test-debug-help: ## Show test debugging commands reference
-	python ./scripts/run_test_debug.py
+	python ./run_test_debug.py
 
 test-run: ## Run test debugging script
-	python ./scripts/run_test_debug.py
+	python ./run_test_debug.py
 
 ##@ Development Setup
 install-shared: ## Install/update the shared package
-	./scripts/microservices.sh install-shared
+	./microservices.sh install-shared
 
 setup: ## Initial project setup (build, start, migrate)
 	@echo "Setting up VTrack project..."
