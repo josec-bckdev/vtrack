@@ -25,3 +25,9 @@ ENV/
 .devcontainer/
 .vscode/
 vtrack-beast.code-workspace
+
+#Tools
+.husky/
+node_modules/
+package-lock.json
+
