@@ -177,7 +177,7 @@ def main():
     consumer = AlertConsumer()
     
     # Start processing with 1-second poll interval
-    consumer.start(poll_interval=1)
+    consumer.start(poll_interval=POLL_INTERVAL_SECONDS)
 
 if __name__ == "__main__":
     main()
