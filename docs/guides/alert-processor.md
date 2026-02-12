@@ -178,21 +178,19 @@ docker exec redis_queue redis-cli LPUSH coordinate_queue '{
 
 ### Scenario 1: Change Geofence Zones
 
-**File to edit:** `shared-package/src/shared/location_alerts.py`
+**File to edit:** `shared-package/src/shared/zones.yaml`
 
 **Example:** Add a new danger zone:
 
-```python
-# Around line 90 in location_alerts.py, add:
-Zone(
-    zone_id=4,
-    name="New Danger Area",
-    latitude=4.6500,      # ← Your coordinates
-    longitude=-74.0700,
-    radius_meters=500,
-    alert_type=AlertType.GEOFENCE_ENTRY,
-    severity=AlertSeverity.CRITICAL
-),
+```yaml
+zones:
+  - zone_id: 8
+    name: "New Danger Area"
+    latitude: 4.6500
+    longitude: -74.0700
+    radius_meters: 500
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "CRITICAL"
 ```
 
 **Test it:**

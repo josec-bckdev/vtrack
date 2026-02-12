@@ -25,9 +25,10 @@ ENV/
 .devcontainer/
 .vscode/
 vtrack-beast.code-workspace
-
+vtrack.code-workspace
 #Tools
 .husky/
 node_modules/
 package-lock.json
-
+#scratchpad files
+design-docs/*

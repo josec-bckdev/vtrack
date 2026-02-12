@@ -30,6 +30,10 @@ from shared.location_alerts import (
 )
 
 
+def get_zone(analyzer: LocationAnalyzer, name: str) -> Zone:
+    return next(zone for zone in analyzer.get_zones() if zone.name == name)
+
+
 class TestZoneManagement:
     """Tests for adding, listing, and managing zones."""
 
@@ -37,17 +41,23 @@ class TestZoneManagement:
         """
         ARRANGE: LocationAnalyzer is initialized
         ACT: Get zones
-        ASSERT: Default zones are present (School, Dangerous Area, Depot)
+        ASSERT: YAML zones are present
         """
         # Act
         zones = location_analyzer_fixture.get_zones()
         
         # Assert
-        assert len(zones) >= 3
-        zone_names = [z.name for z in zones]
-        assert "School Zone" in zone_names
-        assert "Dangerous Area" in zone_names
-        assert "Route Depot" in zone_names
+        assert len(zones) == 7
+        zone_names = {z.name for z in zones}
+        assert zone_names == {
+            "Cota-conejera",
+            "Boyaca",
+            "Prado",
+            "Batan",
+            "Av 116 - Cr 53",
+            "Calle 115 - Cr 54",
+            "Casita"
+        }
 
     def test_add_custom_zone_successfully(self, location_analyzer_fixture):
         """
@@ -79,7 +89,7 @@ class TestZoneManagement:
         zone_names = [z.name for z in location_analyzer_fixture.get_zones()]
         assert "Custom Test Zone" in zone_names
 
-    def test_add_duplicate_zone_fails(self, location_analyzer_fixture, sample_zones):
+    def test_add_duplicate_zone_fails(self, location_analyzer_fixture):
         """
         ARRANGE: Zone with duplicate ID
         ACT: Try to add a zone with existing ID
@@ -139,10 +149,10 @@ class TestZoneIntersection:
         ASSERT: Returns True
         """
         # Arrange
-        school_zone = sample_zones['school']
+        boyaca_zone = sample_zones['boyaca']
         
         # Act - coordinate at the exact center
-        is_inside = school_zone.is_within(4.7110, -74.0059)
+        is_inside = boyaca_zone.is_within(boyaca_zone.latitude, boyaca_zone.longitude)
         
         # Assert
         assert is_inside is True
@@ -154,10 +164,10 @@ class TestZoneIntersection:
         ASSERT: Returns False
         """
         # Arrange
-        school_zone = sample_zones['school']
+        boyaca_zone = sample_zones['boyaca']
         
         # Act - coordinate very far away (different city)
-        is_inside = school_zone.is_within(3.0000, -76.0000)
+        is_inside = boyaca_zone.is_within(3.0000, -76.0000)
         
         # Assert
         assert is_inside is False
@@ -169,13 +179,13 @@ class TestZoneIntersection:
         ASSERT: Properly detects inside/outside boundary
         """
         # Arrange
-        school_zone = sample_zones['school']
+        boyaca_zone = sample_zones['boyaca']
         
-        # The school zone is at (4.7110, -74.0059) with 500m radius
+        # The Boyaca zone is at (4.742, -74.065845) with 1600m radius
         # Test a coordinate approximately 500m away
         
-        # This coordinate is approximately 550m away (slightly outside)
-        is_inside = school_zone.is_within(4.7110, -74.0010)
+        # This coordinate is approximately 1km away (slightly outside)
+        is_inside = boyaca_zone.is_within(4.742, -74.0550)
         
         # Should be outside or on boundary
         # Note: Exact calculation depends on geodesic distance
@@ -186,63 +196,63 @@ class TestZoneIntersection:
 class TestGeofenceEntryDetection:
     """Tests for detecting when routes enter geofence zones."""
 
-    def test_entry_detection_first_time_in_zone(self, location_analyzer_fixture, sample_zones):
+    def test_entry_detection_first_time_in_zone(self, location_analyzer_fixture):
         """
         ARRANGE: Route never seen before, coordinate inside zone
         ACT: Analyze coordinate
         ASSERT: Entry alert is generated
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
         
-        # Act - first time analyzing position inside school zone
+        # Act - first time analyzing position inside Boyaca zone
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Assert
         assert len(alerts) == 1
         alert = alerts[0]
         assert alert.alert_type == AlertType.GEOFENCE_ENTRY
-        assert alert.zone_name == "School Zone"
+        assert alert.zone_name == "Boyaca"
         assert alert.ruta == 101
 
-    def test_no_entry_alert_if_already_in_zone(self, location_analyzer_fixture, sample_zones):
+    def test_no_entry_alert_if_already_in_zone(self, location_analyzer_fixture):
         """
         ARRANGE: Route is already inside zone (from previous analysis)
         ACT: Analyze coordinate inside same zone
         ASSERT: No entry alert is generated
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
         
         # First analysis - establishes that route is in zone
         location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Act - analyze same location again
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Assert - no entry alert since already in zone
         assert len(alerts) == 0
 
-    def test_entry_alert_when_moving_into_zone(self, location_analyzer_fixture, sample_zones):
+    def test_entry_alert_when_moving_into_zone(self, location_analyzer_fixture):
         """
         ARRANGE: Route outside zone, then moves inside
         ACT: First outside, then inside
         ASSERT: Entry alert only on second analysis
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
         
         # First analysis - outside zone
         alerts1 = location_analyzer_fixture.analyze_coordinate(
@@ -257,8 +267,8 @@ class TestGeofenceEntryDetection:
         # Act - move into zone
         alerts2 = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Assert - entry alert when moving in
@@ -269,49 +279,49 @@ class TestGeofenceEntryDetection:
 class TestGeofenceExitDetection:
     """Tests for detecting when routes exit geofence zones."""
 
-    def test_exit_alert_for_exit_type_zone(self, location_analyzer_fixture, sample_zones):
+    def test_exit_alert_for_exit_type_zone(self, location_analyzer_fixture):
         """
-        ARRANGE: Zone with GEOFENCE_EXIT alert type (Depot)
+        ARRANGE: Zone with GEOFENCE_EXIT alert type (Cota-conejera)
         ACT: Route moves from inside to outside
         ASSERT: Exit alert is generated
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['depot'])
+        cota_zone = get_zone(location_analyzer_fixture, "Cota-conejera")
         
-        # First analysis - inside depot zone
+        # First analysis - inside Cota-conejera zone
         location_analyzer_fixture.analyze_coordinate(
             ruta=104,
-            latitude=4.5500,
-            longitude=-74.1000
+            latitude=cota_zone.latitude,
+            longitude=cota_zone.longitude
         )
         
-        # Act - move out of depot
+        # Act - move out of Cota-conejera
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=104,
-            latitude=3.0000,
-            longitude=-76.0000
+            latitude=cota_zone.latitude + 0.05,
+            longitude=cota_zone.longitude
         )
         
         # Assert
         assert len(alerts) == 1
         alert = alerts[0]
         assert alert.alert_type == AlertType.GEOFENCE_EXIT
-        assert alert.zone_name == "Route Depot"
+        assert alert.zone_name == "Cota-conejera"
 
-    def test_no_exit_alert_for_entry_type_zone(self, location_analyzer_fixture, sample_zones):
+    def test_no_exit_alert_for_entry_type_zone(self, location_analyzer_fixture):
         """
-        ARRANGE: Zone with GEOFENCE_ENTRY alert type (School)
+        ARRANGE: Zone with GEOFENCE_ENTRY alert type (Boyaca)
         ACT: Route moves from inside to outside
         ASSERT: No exit alert is generated (only entry type)
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
         
         # First analysis - inside
         location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Act - move out
@@ -328,22 +338,22 @@ class TestGeofenceExitDetection:
 class TestMultipleZoneTracking:
     """Tests for routes being in multiple zones simultaneously."""
 
-    def test_route_in_multiple_zones(self, location_analyzer_fixture, sample_zones):
+    def test_route_in_multiple_zones(self, location_analyzer_fixture):
         """
         ARRANGE: Two overlapping zones
         ACT: Route at position that's in both zones
         ASSERT: Entry alerts generated for both zones
         """
-        # Arrange - add two zones
-        location_analyzer_fixture.add_zone(sample_zones['school'])
-        location_analyzer_fixture.add_zone(sample_zones['dangerous'])
+        # Arrange
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        prado_zone = get_zone(location_analyzer_fixture, "Prado")
         
         # Act - coordinate that might be in both
-        # (This depends on actual overlap - using school coordinate as example)
+        # (This depends on actual overlap - using Boyaca coordinate as example)
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Assert
@@ -352,77 +362,77 @@ class TestMultipleZoneTracking:
         for alert in alerts:
             assert alert.alert_type == AlertType.GEOFENCE_ENTRY
 
-    def test_route_moves_between_zones(self, location_analyzer_fixture, sample_zones):
+    def test_route_moves_between_zones(self, location_analyzer_fixture):
         """
         ARRANGE: Route tracking across multiple zones
         ACT: Route moves from one zone to another
         ASSERT: Proper entry/exit alerts
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
-        location_analyzer_fixture.add_zone(sample_zones['depot'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        prado_zone = get_zone(location_analyzer_fixture, "Prado")
         
-        # Act 1 - Route enters school
+        # Act 1 - Route enters Boyaca
         alerts1 = location_analyzer_fixture.analyze_coordinate(
             ruta=105,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
-        # Assert - entry to school
+        # Assert - entry to Boyaca
         assert len(alerts1) == 1
-        assert alerts1[0].zone_name == "School Zone"
+        assert alerts1[0].zone_name == "Boyaca"
         
-        # Act 2 - Route exits school but is still tracked
+        # Act 2 - Route exits Boyaca but is still tracked
         alerts2 = location_analyzer_fixture.analyze_coordinate(
             ruta=105,
             latitude=3.0000,
             longitude=-76.0000
         )
         
-        # Assert - no alerts (school is entry-only)
+        # Assert - no alerts (Boyaca is entry-only)
         assert len(alerts2) == 0
         
-        # Act 3 - Route enters depot
+        # Act 3 - Route enters Prado
         alerts3 = location_analyzer_fixture.analyze_coordinate(
             ruta=105,
-            latitude=4.5500,
-            longitude=-74.1000
+            latitude=prado_zone.latitude,
+            longitude=prado_zone.longitude
         )
         
-        # Assert - entry to depot
+        # Assert - entry to Prado
         assert len(alerts3) == 1
-        assert alerts3[0].zone_name == "Route Depot"
+        assert alerts3[0].zone_name == "Prado"
 
 
 class TestAlertGeneration:
     """Tests for alert object creation and properties."""
 
-    def test_alert_contains_correct_information(self, location_analyzer_fixture, sample_zones):
+    def test_alert_contains_correct_information(self, location_analyzer_fixture):
         """
         ARRANGE: Geofence event
         ACT: Generate alert
         ASSERT: Alert contains all required information
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
         
         # Act
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Assert
         alert = alerts[0]
         assert isinstance(alert, LocationAlert)
         assert alert.ruta == 101
-        assert alert.latitude == 4.7110
-        assert alert.longitude == -74.0059
+        assert alert.latitude == boyaca_zone.latitude
+        assert alert.longitude == boyaca_zone.longitude
         assert alert.alert_type == AlertType.GEOFENCE_ENTRY
-        assert alert.zone_name == "School Zone"
-        assert alert.severity == AlertSeverity.INFO
+        assert alert.zone_name == "Boyaca"
+        assert alert.severity == AlertSeverity.WARNING
         assert isinstance(alert.timestamp, datetime)
         assert alert.message != ""
 
@@ -473,19 +483,19 @@ class TestRouteStatusTracking:
         assert status['last_position'] is None
         assert status['last_update'] is None
 
-    def test_get_route_status_in_zone(self, location_analyzer_fixture, sample_zones):
+    def test_get_route_status_in_zone(self, location_analyzer_fixture):
         """
         ARRANGE: Route inside a zone
         ACT: Get route status
         ASSERT: Status shows zone ID and position
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
         
         location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Act
@@ -493,27 +503,26 @@ class TestRouteStatusTracking:
         
         # Assert
         assert status['ruta'] == 101
-        assert 1 in status['current_zones']
+        assert boyaca_zone.zone_id in status['current_zones']
         assert status['last_position'] is not None
-        assert status['last_position']['latitude'] == 4.7110
-        assert status['last_position']['longitude'] == -74.0059
+        assert status['last_position']['latitude'] == boyaca_zone.latitude
+        assert status['last_position']['longitude'] == boyaca_zone.longitude
         assert status['last_update'] is not None
 
-    def test_get_route_status_multiple_zones(self, location_analyzer_fixture, sample_zones):
+    def test_get_route_status_multiple_zones(self, location_analyzer_fixture):
         """
         ARRANGE: Route potentially in multiple zones
         ACT: Get route status
         ASSERT: Shows all current zones
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
-        location_analyzer_fixture.add_zone(sample_zones['dangerous'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
         
-        # Analyze at school location
+        # Analyze at Boyaca location
         location_analyzer_fixture.analyze_coordinate(
             ruta=102,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Act
@@ -521,26 +530,26 @@ class TestRouteStatusTracking:
         
         # Assert
         assert status['ruta'] == 102
-        assert len(status['current_zones']) >= 1
+        assert boyaca_zone.zone_id in status['current_zones']
         assert isinstance(status['current_zones'], list)
 
 
 class TestRouteTrackingStateManagement:
     """Tests for managing route tracking state."""
 
-    def test_clear_route_tracking(self, location_analyzer_fixture, sample_zones):
+    def test_clear_route_tracking(self, location_analyzer_fixture):
         """
         ARRANGE: Route is being tracked
         ACT: Clear tracking for that route
         ASSERT: Route status is reset
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
         
         location_analyzer_fixture.analyze_coordinate(
             ruta=103,
-            latitude=4.7110,
-            longitude=-74.0059
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
         )
         
         # Verify route is tracked
@@ -554,18 +563,26 @@ class TestRouteTrackingStateManagement:
         status_after = location_analyzer_fixture.get_route_status(ruta=103)
         assert status_after['current_zones'] == []
 
-    def test_clear_tracking_for_one_route_doesnt_affect_others(self, location_analyzer_fixture, sample_zones):
+    def test_clear_tracking_for_one_route_doesnt_affect_others(self, location_analyzer_fixture):
         """
         ARRANGE: Multiple routes being tracked
         ACT: Clear tracking for one route
         ASSERT: Other routes still tracked
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
         
         # Track two routes
-        location_analyzer_fixture.analyze_coordinate(ruta=201, latitude=4.7110, longitude=-74.0059)
-        location_analyzer_fixture.analyze_coordinate(ruta=202, latitude=4.7110, longitude=-74.0059)
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=201,
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
+        )
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=202,
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
+        )
         
         # Act - clear route 201
         location_analyzer_fixture.clear_route_tracking(ruta=201)
@@ -581,16 +598,17 @@ class TestRouteTrackingStateManagement:
 class TestComplexGeofencingScenarios:
     """Integration-style tests for complex real-world scenarios."""
 
-    def test_route_tour_through_multiple_zones(self, location_analyzer_fixture, sample_zones):
+    def test_route_tour_through_multiple_zones(self, location_analyzer_fixture):
         """
         ARRANGE: Multiple zones, one route
         ACT: Simulate route movement through all zones
         ASSERT: Correct sequence of alerts
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
-        location_analyzer_fixture.add_zone(sample_zones['dangerous'])
-        location_analyzer_fixture.add_zone(sample_zones['depot'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        prado_zone = get_zone(location_analyzer_fixture, "Prado")
+        cota_zone = get_zone(location_analyzer_fixture, "Cota-conejera")
+        casita_zone = get_zone(location_analyzer_fixture, "Casita")
         
         # Act & Assert - simulate a route tour
         
@@ -598,53 +616,94 @@ class TestComplexGeofencingScenarios:
         alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=3.0, longitude=-76.0)
         assert len(alerts) == 0
         
-        # 2. Enter school
-        alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=4.7110, longitude=-74.0059)
+        # 2. Enter Boyaca
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=301,
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
+        )
         assert len(alerts) >= 1
-        assert any(a.zone_name == "School Zone" for a in alerts)
+        assert any(a.zone_name == "Boyaca" for a in alerts)
         prev_alert_count = len(alerts)
         
-        # 3. Stay in school
-        alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=4.7110, longitude=-74.0059)
+        # 3. Stay in Boyaca
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=301,
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
+        )
         assert len(alerts) == 0  # No new entries
         
-        # 4. Exit to middle ground
-        alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=4.5500, longitude=-74.1000)
+        # 4. Move to Prado
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=301,
+            latitude=prado_zone.latitude,
+            longitude=prado_zone.longitude
+        )
         # May or may not have alert depending on overlap
         
-        # 5. Enter depot
-        alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=4.5500, longitude=-74.1000)
-        # Should have entry alert if not already tracking
-        
-        # Final status should show depot
-        status = location_analyzer_fixture.get_route_status(ruta=301)
-        assert 3 in status['current_zones']
+        # 5. Enter Cota (exit-type zone)
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=301,
+            latitude=cota_zone.latitude,
+            longitude=cota_zone.longitude
+        )
+        # Exit alert triggers when leaving
+        alerts = location_analyzer_fixture.analyze_coordinate(
+            ruta=301,
+            latitude=cota_zone.latitude + 0.05,
+            longitude=cota_zone.longitude
+        )
+        assert any(a.alert_type == AlertType.GEOFENCE_EXIT for a in alerts)
 
-    def test_concurrent_routes_independent_tracking(self, location_analyzer_fixture, sample_zones):
+        # 6. Enter Casita
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=301,
+            latitude=casita_zone.latitude,
+            longitude=casita_zone.longitude
+        )
+        
+        # Final status should show Casita
+        status = location_analyzer_fixture.get_route_status(ruta=301)
+        assert casita_zone.zone_id in status['current_zones']
+
+    def test_concurrent_routes_independent_tracking(self, location_analyzer_fixture):
         """
         ARRANGE: Multiple routes moving independently
         ACT: Analyze coordinates for each
         ASSERT: Each route tracked independently
         """
         # Arrange
-        location_analyzer_fixture.add_zone(sample_zones['school'])
-        location_analyzer_fixture.add_zone(sample_zones['depot'])
+        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        prado_zone = get_zone(location_analyzer_fixture, "Prado")
         
-        # Act - route 401 enters school
-        location_analyzer_fixture.analyze_coordinate(ruta=401, latitude=4.7110, longitude=-74.0059)
+        # Act - route 401 enters Boyaca
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=401,
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
+        )
         status_401_school = location_analyzer_fixture.get_route_status(ruta=401)
         
         # Another analysis for same route
-        location_analyzer_fixture.analyze_coordinate(ruta=401, latitude=4.7110, longitude=-74.0059)
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=401,
+            latitude=boyaca_zone.latitude,
+            longitude=boyaca_zone.longitude
+        )
         
-        # Route 402 enters depot
-        location_analyzer_fixture.analyze_coordinate(ruta=402, latitude=4.5500, longitude=-74.1000)
+        # Route 402 enters Prado
+        location_analyzer_fixture.analyze_coordinate(
+            ruta=402,
+            latitude=prado_zone.latitude,
+            longitude=prado_zone.longitude
+        )
         status_402_depot = location_analyzer_fixture.get_route_status(ruta=402)
         
         # Assert
-        assert 1 in status_401_school['current_zones']
-        assert 3 in status_402_depot['current_zones']
+        assert boyaca_zone.zone_id in status_401_school['current_zones']
+        assert prado_zone.zone_id in status_402_depot['current_zones']
         
         # Routes should be in different zones
-        assert 1 not in status_402_depot['current_zones']
-        assert 3 not in status_401_school['current_zones']
+        assert boyaca_zone.zone_id not in status_402_depot['current_zones']
+        assert prado_zone.zone_id not in status_401_school['current_zones']

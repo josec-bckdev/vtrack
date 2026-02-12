@@ -320,7 +320,8 @@ class TestDataFetching:
         with patch('app.scraper_async.SCRAPER_EMAIL', 'test@example.com'):
             with patch('app.scraper_async.SCRAPER_PASSWORD', 'test_password'):
                 with patch('app.scraper_async.httpx.AsyncClient') as mock_client_class:
-                    mock_client_class.return_value.__aenter__.return_value = mock_httpx_client
+                    mock_httpx_client.aclose = AsyncMock()
+                    mock_client_class.return_value = mock_httpx_client
                     result = await manager._fetch_remote_data_async()
 
         # Assert
@@ -383,7 +384,10 @@ class TestCollectionStateMachine:
         normalized_data = {'route_status': 'Detenido'}
 
         # Act
-        should_start = manager._should_start_collection(normalized_data)
+        fixed_dt = datetime(2025, 1, 15, 12, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
+        with patch("app.scraper_async.datetime") as mock_datetime:
+            mock_datetime.now.return_value = fixed_dt
+            should_start = manager._should_start_collection(normalized_data)
 
         # Assert
         assert should_start is False

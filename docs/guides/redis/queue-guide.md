@@ -231,7 +231,7 @@ docker logs -f alert_processor
 
 # You'll see output like:
 # 2026-02-10 14:30:45 - INFO - Processed 100 coordinates, Generated 3 alerts
-# 2026-02-10 14:30:47 - WARNING - [ALERT] Route 101: GEOFENCE_ENTRY in School Zone - Severity: INFO
+# 2026-02-10 14:30:47 - WARNING - [ALERT] Route 101: GEOFENCE_ENTRY in Boyaca - Severity: WARNING
 ```
 
 ```bash

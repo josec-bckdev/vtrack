@@ -429,38 +429,38 @@ def sample_zones():
     """
     Provides sample geofence zones for testing.
 
-    These represent real-world zones where we want to track routes.
+    These represent the YAML-configured zones used by the application.
     """
     from shared.location_alerts import Zone, AlertType, AlertSeverity
     
     return {
-        'school': Zone(
+        'cota': Zone(
             zone_id=1,
-            name="Test School",
-            latitude=4.7110,
-            longitude=-74.0059,
-            radius_meters=500,
-            alert_type=AlertType.GEOFENCE_ENTRY,
-            severity=AlertSeverity.INFO,
-            enabled=True
-        ),
-        'dangerous': Zone(
-            zone_id=2,
-            name="Test Dangerous Area",
-            latitude=4.6289,
-            longitude=-74.0832,
-            radius_meters=1000,
-            alert_type=AlertType.GEOFENCE_ENTRY,
-            severity=AlertSeverity.CRITICAL,
-            enabled=True
-        ),
-        'depot': Zone(
-            zone_id=3,
-            name="Test Depot",
-            latitude=4.5500,
-            longitude=-74.1000,
-            radius_meters=750,
+            name="Cota-conejera",
+            latitude=4.767916,
+            longitude=-74.07654149999999,
+            radius_meters=1500,
             alert_type=AlertType.GEOFENCE_EXIT,
+            severity=AlertSeverity.WARNING,
+            enabled=True
+        ),
+        'boyaca': Zone(
+            zone_id=2,
+            name="Boyaca",
+            latitude=4.742,
+            longitude=-74.065845,
+            radius_meters=1600,
+            alert_type=AlertType.GEOFENCE_ENTRY,
+            severity=AlertSeverity.WARNING,
+            enabled=True
+        ),
+        'prado': Zone(
+            zone_id=3,
+            name="Prado",
+            latitude=4.7186734999999995,
+            longitude=-74.062382,
+            radius_meters=1200,
+            alert_type=AlertType.GEOFENCE_ENTRY,
             severity=AlertSeverity.WARNING,
             enabled=True
         ),

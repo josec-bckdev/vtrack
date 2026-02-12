@@ -215,8 +215,8 @@ Producer (FastAPI)                Redis                Consumer (alert-processor
   "latitude": 4.7110,
   "longitude": -74.0059,
   "alert_type": "GEOFENCE_ENTRY",
-  "area_name": "School Zone",
-  "severity": "INFO",
+  "area_name": "Boyaca",
+  "severity": "WARNING",
   "timestamp": "2024-02-09T10:30:46-05:00"
 }
 ```
@@ -273,24 +273,21 @@ Required:
 
 Optional:
 - `PGADMIN_EMAIL`, `PGADMIN_PASSWORD`
-- Custom zone definitions (future enhancement)
+- Custom zone definitions (YAML file)
 
 ### Zone Configuration
 
-Currently hardcoded in `shared-package/src/shared/location_alerts.py`:
-```python
-Zone(
-    zone_id=1,
-    name="School Zone",
-    latitude=4.7110,
-    longitude=-74.0059,
-    radius_meters=500,
-    alert_type=AlertType.GEOFENCE_ENTRY,
-    severity=AlertSeverity.INFO
-)
+Zones are loaded from `shared-package/src/shared/zones.yaml`:
+```yaml
+zones:
+  - zone_id: 2
+    name: "Boyaca"
+    latitude: 4.742
+    longitude: -74.065845
+    radius_meters: 1600
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
 ```
-
-Future enhancement: Load zones from database or config file.
 
 ## How Alert Processor Works
 
