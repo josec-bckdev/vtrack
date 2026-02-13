@@ -20,11 +20,16 @@ COPY microservices/alert-processor /app
 RUN pip install --no-cache-dir \
     redis \
     rq \
-    geopy
+    geopy \
+    pyyaml \
+    debugpy
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV REDIS_URL=redis://redis:6379/0
 
-# Run the alert consumer
-CMD ["python", "main.py"]
+# Expose debug port
+EXPOSE 5679
+
+# Run the alert consumer with debugpy (removed --wait-for-client to allow normal startup)
+CMD ["python", "-Xfrozen_modules=off", "-m", "debugpy", "--listen", "0.0.0.0:5679", "main.py"]

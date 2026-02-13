@@ -16,3 +16,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY shared-package /app/shared-package
 RUN pip install --no-cache-dir -e /app/shared-package/
 
+# Copy the app directory
+COPY app /app/app
+
+# Set PYTHONPATH to include shared package
+ENV PYTHONPATH=/app/shared-package/src:/app:$PYTHONPATH
+
+# Run with Uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+

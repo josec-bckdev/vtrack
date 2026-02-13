@@ -128,6 +128,8 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       PYTHONUNBUFFERED: 1
+    ports:
+      - "5679:5679"  # Debug port
     networks:
       - vtrack-network
     logging:
@@ -135,6 +137,34 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  # Microservices - Notification Sender        
+  notification-sender:
+    build:
+      context: .
+      dockerfile: microservices/notification-sender/Dockerfile
+    container_name: notification_sender
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      POLL_INTERVAL: 2
+    env_file:
+      - .env
+    volumes:
+      - ./microservices/notification-sender:/app
+      - ./shared-package:/tmp/shared-package
+    networks:
+      - vtrack-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 
   # Optional: Data Collector Microservice (for independent data collection)
   # Uncomment to enable as a separate service

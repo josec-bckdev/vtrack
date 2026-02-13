@@ -1,0 +1,3 @@
+recursive-include src/shared *.yaml
+recursive-include src/shared *.yml
+recursive-include src/shared *.json

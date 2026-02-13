@@ -12,11 +12,13 @@ setup(
     author="Vtrack Team",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
+    include_package_data=True,
     python_requires=">=3.10",
     install_requires=[
         "redis>=5.0.0",
         "rq>=1.13.0",
         "geopy>=2.3.0",
         "pydantic>=2.0.0",
+        "pyyaml>=6.0",
     ],
 )
