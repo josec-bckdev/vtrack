@@ -1,5 +1,13 @@
 zones:
   - zone_id: 1
+    name: "Liceo JRJ"
+    latitude: 4.773210
+    longitude: -74.084051
+    radius_meters: 300
+    alert_type: "GEOFENCE_EXIT"
+    severity: "WARNING"
+    
+  - zone_id: 2
     name: "Cota-conejera"
     latitude: 4.767916
     longitude: -74.07654149999999
@@ -7,23 +15,47 @@ zones:
     alert_type: "GEOFENCE_EXIT"
     severity: "WARNING"
     
-  - zone_id: 2
-    name: "Boyaca"
-    latitude: 4.742
-    longitude: -74.065845
-    radius_meters: 1600
-    alert_type: "GEOFENCE_ENTRY"
-    severity: "WARNING"
-    
   - zone_id: 3
-    name: "Prado"
-    latitude: 4.7186734999999995
-    longitude: -74.062382
+    name: "Boyaca - Norte_1 160"
+    latitude: 4.748207
+    longitude: -74.069581
     radius_meters: 1200
     alert_type: "GEOFENCE_ENTRY"
     severity: "WARNING"
     
   - zone_id: 4
+    name: "Boyaca - Norte_2"
+    latitude: 4.736496
+    longitude: -74.071752
+    radius_meters: 1000
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 5
+    name: "Av Calle 170"
+    latitude: 4.759250
+    longitude: -74.050400
+    radius_meters: 1600
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 6
+    name: "Auto Norte 170 - 140"
+    latitude: 4.731114
+    longitude: -74.045
+    radius_meters: 1600
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 7
+    name: "Prado"
+    latitude: 4.7186735
+    longitude: -74.062382
+    radius_meters: 1200
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 8
     name: "Batan"
     latitude: 4.705053
     longitude: -74.054543
@@ -31,7 +63,7 @@ zones:
     alert_type: "GEOFENCE_ENTRY"
     severity: "WARNING"
     
-  - zone_id: 5
+  - zone_id: 9
     name: "Av 116 - Cr 53"
     latitude: 4.702032
     longitude: -74.061327
@@ -39,7 +71,7 @@ zones:
     alert_type: "GEOFENCE_ENTRY"
     severity: "WARNING"
     
-  - zone_id: 6
+  - zone_id: 10
     name: "Calle 115 - Cr 54"
     latitude: 4.699599
     longitude: -74.063802
@@ -47,10 +79,28 @@ zones:
     alert_type: "GEOFENCE_ENTRY"
     severity: "WARNING"
     
-  - zone_id: 7
+  - zone_id: 11
+    name: "Fede"
+    latitude: 4.699838
+    longitude: -74.061065
+    radius_meters: 70
+    alert_type: "GEOFENCE_ENTRY"
+    severity: "WARNING"
+    
+  - zone_id: 12
     name: "Casita"
     latitude: 4.699
     longitude: -74.060312
     radius_meters: 70
     alert_type: "GEOFENCE_ENTRY"
     severity: "WARNING"
+    
+  - zone_id: 13
+    name: "Batan"
+    latitude: 4.705053
+    longitude: -74.054543
+    radius_meters: 600
+    alert_type: "GEOFENCE_EXIT"
+    severity: "WARNING"
+
+

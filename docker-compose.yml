@@ -130,6 +130,8 @@ services:
       PYTHONUNBUFFERED: 1
     ports:
       - "5679:5679"  # Debug port
+    volumes:
+      - ./shared-package/src/shared/zones.yaml:/usr/local/lib/python3.11/site-packages/shared/zones.yaml
     networks:
       - vtrack-network
     logging:
