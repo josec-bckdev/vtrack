@@ -2,20 +2,47 @@ import logging
 import asyncio
 from telegram import Bot
 from telegram.error import TelegramError
-from config import settings
+from config import settings, load_users
 
 logger = logging.getLogger(__name__)
 
 class TelegramNotifier:
-    """Simple Telegram notification sender"""
+    """Telegram notification sender with multi-user support"""
     
     def __init__(self):
         logger.info(f"Initializing Telegram bot...")
         logger.info(f"Bot Token length: {len(settings.TELEGRAM_BOT_TOKEN)}")
-        logger.info(f"Chat ID: {settings.TELEGRAM_CHAT_ID}")
         
         self.bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
-        self.chat_id = settings.TELEGRAM_CHAT_ID
+        
+        # Load users from users.yaml
+        try:
+            self.users = load_users()
+            logger.info(f"✅ Loaded {len(self.users)} users from users.yaml")
+            
+            # Log user summary
+            admin_count = sum(1 for u in self.users if u['role'] == 'admin')
+            user_count = sum(1 for u in self.users if u['role'] == 'user')
+            logger.info(f"   📊 {admin_count} admin(s), {user_count} regular user(s)")
+            
+            for user in self.users:
+                logger.info(f"   👤 {user['name']} ({user['role']}) - Chat ID: {user['telegram_id']}")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to load users.yaml: {e}")
+            logger.error("Falling back to legacy TELEGRAM_CHAT_ID from environment")
+            # Fallback to old single-user mode
+            if settings.TELEGRAM_CHAT_ID:
+                self.users = [{
+                    'name': 'Legacy User',
+                    'telegram_id': settings.TELEGRAM_CHAT_ID,
+                    'role': 'admin'
+                }]
+            else:
+                raise ValueError("No users configured and TELEGRAM_CHAT_ID not set!")
+        
+        # Keep chat_id for backward compatibility (uses first user)
+        self.chat_id = self.users[0]['telegram_id'] if self.users else None
         
         # ==================== EVENT LOOP PATTERN FOR ASYNC CODE ====================
         #
@@ -200,180 +227,74 @@ class TelegramNotifier:
     
     def send_alert(self, alert_data):
         """
-        Send an alert to Telegram (Sync wrapper around async Telegram API)
+        Send an alert to ALL users (Sync wrapper around async Telegram API)
         
-        HOW THIS CONNECTS TO self.loop:
-        ================================
-        Remember: self.loop was created in __init__ and lives for entire object lifetime
+        This method loops through all configured users and sends the alert
+        to each recipient. Both admin and regular users receive alerts.
         
-        THE KEY LINE:
-        =============
-        result = self.loop.run_until_complete(self.bot.send_message(...))
-                 ↑             ↑               ↑
-                 |             |               The async coroutine (not executed yet)
-                 |             Blocks until coroutine completes
-                 Our persistent event loop
-        
-        WHAT HAPPENS STEP-BY-STEP:
-        ==========================
-        1. self.bot.send_message() returns a COROUTINE object
-           - It's like a "promise to do async work"
-           - Nothing executes yet! Just a recipe waiting to run
-        
-        2. self.loop.run_until_complete() takes that coroutine and:
-           a) Schedules it on the event loop
-           b) Runs the event loop (starts processing)
-           c) BLOCKS this thread until send_message finishes
-           d) Returns the result (the sent Message object)
-        
-        3. During the block (step c), here's what happens:
-           - Telegram library opens HTTP connection
-           - Sends POST request to Telegram API
-           - Waits for response (network I/O)
-           - Parses response
-           - Returns Message object
-        
-        BLOCKING VISUALIZATION:
-        =======================
-        Timeline of execution:
-        
-        Time  | Main Thread                    | Network Activity
-        ------|--------------------------------|------------------
-        T0    | send_alert() called           | 
-        T1    | Format message                 | 
-        T2    | loop.run_until_complete()     | Opens connection
-        T3    | ⏸️ BLOCKED waiting...          | Sending HTTP request
-        T4    | ⏸️ Still waiting...            | Server processing
-        T5    | ⏸️ Still waiting...            | Receiving response
-        T6    | ✅ Unblocks, gets result       | Connection closes
-        T7    | Log success message            |
-        T8    | return True                    |
-        
-        During T3-T5, the main thread cannot:
-        - Process other alerts
-        - Check for new alerts
-        - Do ANY other work (it's BLOCKED)
-        
-        WHY IS THIS OK?
-        ===============
-        For our use case (low-volume alerts):
-        - Send takes ~100-500ms
-        - We get 1-2 alerts per minute
-        - Blocking for 500ms is negligible
-        
-        When it would be BAD:
-        - High volume: 100 alerts/second
-        - 500ms block × 100 = can only handle 2 per second!
-        - Would need full async: await send_message() + task concurrency
-        
-        ALTERNATIVE 1 - Full Async (High Volume):
-        ==========================================
-        async def send_alert(self, alert_data):
-            result = await self.bot.send_message(...)
-                     ↑
-                     Yields control to event loop while waiting
-                     Other coroutines can run concurrently
-        
-        async def main_loop():
-            while True:
-                alert = await pop_from_queue()
-                asyncio.create_task(send_alert(alert))  ← Non-blocking!
-                         ↑
-                         Schedules send, doesn't wait for completion
-        
-        Pros: Can send 100s of messages concurrently
-        Cons: Entire codebase becomes async (complex refactor)
-        
-        ALTERNATIVE 2 - Threading (Medium Volume):
-        ===========================================
-        def send_alert(self, alert_data):
-            thread = Thread(target=self._send_sync, args=(alert_data,))
-            thread.start()  ← Non-blocking
-        
-        def _send_sync(self, alert_data):
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(self.bot.send_message(...))
-            loop.close()
-        
-        Pros: Non-blocking, keeps sync code
-        Cons: Thread overhead, no easy way to track results
-        
-        ALTERNATIVE 3 - Current Approach (Low Volume):
-        ===============================================
-        def send_alert(self, alert_data):
-            result = self.loop.run_until_complete(...)  ← Blocking
-        
-        Pros: Simple, efficient, easy to debug, predictable
-        Cons: Blocks during send (acceptable at low volume)
-        
-        WHEN TO MIGRATE TO FULL ASYNC:
-        ===============================
-        Signs you need it:
-        1. Alerts queue up faster than you can send
-        2. LLEN alert_queue keeps growing
-        3. Alert latency > 5 seconds
-        4. You see "slow sending" logs
-        
-        Until then, this pattern is PERFECT for the job:
-        - Simple to understand
-        - Easy to debug (sequential execution)
-        - Efficient enough for current load
-        - No concurrency bugs to worry about
-        
-        IMPORTANT: WHY run_until_complete() NOT await():
-        =================================================
-        This won't work:
-            def send_alert(self):
-                result = await self.bot.send_message(...)
-                         ↑
-                         SyntaxError: 'await' outside async function
-        
-        'await' can ONLY be used inside 'async def' functions
-        We're in regular 'def', so we use run_until_complete() instead
-        
-        Think of it as:
-            await              → async world's way to wait
-            run_until_complete → sync world's way to wait for async
+        Returns:
+            bool: True if at least one message was sent successfully
         """
-        try:
-            message = self.format_alert(alert_data)
-            logger.info(f"📤 Sending message to chat_id: {self.chat_id}")
-            logger.debug(f"Message content: {message}")
-            
-            # ==================== THE MAGIC LINE ====================
-            # Run async send_message using the persistent event loop
-            # 
-            # What happens:
-            # 1. bot.send_message() creates a coroutine (async task definition)
-            # 2. loop.run_until_complete() executes it on our persistent loop
-            # 3. This thread BLOCKS until Telegram API responds
-            # 4. Result is returned (Message object from Telegram)
-            #
-            # Blocking duration: Usually 100-500ms (network + Telegram processing)
-            # 
-            # During this time, the main consumer loop is PAUSED at this line
-            # Can't process other alerts until this returns
-            # Trade-off: Simplicity vs. Concurrency (we chose simplicity)
-            result = self.loop.run_until_complete(self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode='Markdown'
-            ))
-            logger.info(f"✅ Sent alert for route {alert_data.get('ruta')} - Message ID: {result.message_id}")
-            return True
-        except TelegramError as e:
-            logger.error(f"❌ Telegram error: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
-            logger.error(f"Chat ID used: {self.chat_id}")
-            return False
-        except Exception as e:
-            logger.error(f"❌ Unexpected error: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
-            return False
+        success_count = 0
+        failure_count = 0
+        
+        message = self.format_alert(alert_data)
+        
+        logger.info(f"📤 Sending alert to {len(self.users)} recipient(s)")
+        
+        for user in self.users:
+            try:
+                logger.debug(f"   Sending to {user['name']} ({user['telegram_id']})...")
+                
+                # Run async send_message using the persistent event loop
+                result = self.loop.run_until_complete(self.bot.send_message(
+                    chat_id=user['telegram_id'],
+                    text=message,
+                    parse_mode='Markdown'
+                ))
+                
+                logger.info(f"   ✅ Sent to {user['name']} - Message ID: {result.message_id}")
+                success_count += 1
+                
+            except TelegramError as e:
+                logger.error(f"   ❌ Telegram error sending to {user['name']}: {e}")
+                logger.error(f"      Error type: {type(e).__name__}")
+                logger.error(f"      Chat ID: {user['telegram_id']}")
+                failure_count += 1
+                
+            except Exception as e:
+                logger.error(f"   ❌ Unexpected error sending to {user['name']}: {e}")
+                logger.error(f"      Error type: {type(e).__name__}")
+                failure_count += 1
+        
+        # Summary
+        logger.info(f"📊 Alert delivery: {success_count} succeeded, {failure_count} failed")
+        
+        # Return True if at least one message was sent successfully
+        return success_count > 0
     
     def send_test(self):
-        """Send a test message"""
+        """
+        Send a test message to ADMIN users only
+        
+        Regular users don't receive test messages to avoid spam.
+        Only users with role='admin' will receive the test notification.
+        
+        Returns:
+            bool: True if at least one admin received the message
+        """
         logger.info("📨 Preparing test message...")
+        
+        # Filter for admin users only
+        admin_users = [u for u in self.users if u['role'] == 'admin']
+        
+        if not admin_users:
+            logger.warning("⚠️  No admin users found! Test message not sent.")
+            logger.warning("   Add at least one user with role='admin' in users.yaml")
+            return False
+        
+        logger.info(f"🎯 Sending test message to {len(admin_users)} admin(s)")
+        
         test_alert = {
             'ruta': 101,
             'alert_type': 'GEOFENCE_ENTRY',
@@ -383,9 +304,37 @@ class TelegramNotifier:
             'longitude': -74.0059,
             'timestamp': '2024-01-01 12:00:00'
         }
-        result = self.send_alert(test_alert)
-        if result:
-            logger.info("✅ Test message sent successfully")
+        
+        success_count = 0
+        failure_count = 0
+        
+        message = self.format_alert(test_alert)
+        
+        for user in admin_users:
+            try:
+                logger.debug(f"   Sending test to {user['name']} ({user['telegram_id']})...")
+                
+                result = self.loop.run_until_complete(self.bot.send_message(
+                    chat_id=user['telegram_id'],
+                    text=f"🧪 *TEST MESSAGE*\n\n{message}",
+                    parse_mode='Markdown'
+                ))
+                
+                logger.info(f"   ✅ Test sent to {user['name']} - Message ID: {result.message_id}")
+                success_count += 1
+                
+            except TelegramError as e:
+                logger.error(f"   ❌ Telegram error sending to {user['name']}: {e}")
+                failure_count += 1
+                
+            except Exception as e:
+                logger.error(f"   ❌ Unexpected error sending to {user['name']}: {e}")
+                failure_count += 1
+        
+        # Summary
+        if success_count > 0:
+            logger.info(f"✅ Test message sent successfully to {success_count}/{len(admin_users)} admin(s)")
         else:
-            logger.error("❌ Test message failed")
-        return result
+            logger.error(f"❌ Test message failed for all {len(admin_users)} admin(s)")
+        
+        return success_count > 0

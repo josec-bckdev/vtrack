@@ -63,11 +63,10 @@ class NotificationConsumer:
         logger.info(f"Redis URL: {settings.REDIS_URL}")
         logger.info(f"Poll Interval: {settings.POLL_INTERVAL}s")
         logger.info(f"Telegram Bot Token: {'*' * 20}{settings.TELEGRAM_BOT_TOKEN[-4:] if len(settings.TELEGRAM_BOT_TOKEN) > 4 else 'NOT SET'}")
-        logger.info(f"Telegram Chat ID: {settings.TELEGRAM_CHAT_ID}")
         
-        if not settings.TELEGRAM_BOT_TOKEN or not settings.TELEGRAM_CHAT_ID:
-            logger.error("❌ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set!")
-            logger.error("Set them in .env or environment variables")
+        if not settings.TELEGRAM_BOT_TOKEN:
+            logger.error("❌ TELEGRAM_BOT_TOKEN not set!")
+            logger.error("Set it in .env or environment variables")
         
         self.telegram = TelegramNotifier()
         self.running = True
@@ -133,7 +132,7 @@ class NotificationConsumer:
     def run(self):
         """Main loop"""
         logger.info("🚀 Starting VTRACK Notification Service")
-        logger.info(f"📱 Sending to chat ID: {self.telegram.chat_id}")
+        logger.info(f"📱 Configured with {len(self.telegram.users)} recipient(s)")
         
         # Send startup notification
         logger.info("📨 Sending test message...")
