@@ -108,4 +108,13 @@ Check DATABASE_URL in .env file
 docker restart redis_queue
 ```
 
-See [Microservices Guide](../architecture/microservices.md) for detailed troubleshooting.
+### ContainerConfig errors or corrupted containers?
+See the [Troubleshooting Guide](../guides/troubleshooting.md) for complete solutions.
+
+**For comprehensive troubleshooting, including:**
+- ContainerConfig error fixes
+- Clean slate workflows
+- Database backup/restore procedures
+- Common Docker issues
+
+👉 **[View Full Troubleshooting Guide](../guides/troubleshooting.md)**

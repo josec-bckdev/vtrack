@@ -19,6 +19,7 @@ Complete documentation for the VTrack vehicle tracking system.
 - [Alert Processor](guides/alert-processor.md) - How the consumer works
 - [Database Migrations](guides/database-migrations.md) - Alembic migrations guide
 - [Deployment](guides/deployment.md) - Production deployment guide
+- [Troubleshooting](guides/troubleshooting.md) - Common issues and solutions
 
 #### Development
 - [Development Workflow](guides/development/workflow.md) - Development best practices and hot reload

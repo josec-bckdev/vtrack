@@ -93,7 +93,27 @@ python redis_monitor.py
 
 See [Testing Guide](docs/testing/guide.md) for details.
 
-## 🚢 Deployment
+## � Troubleshooting
+
+Having issues? Check the [Troubleshooting Guide](docs/guides/troubleshooting.md) for:
+- ContainerConfig errors
+- Clean slate procedures
+- Database backup/restore
+- Common Docker issues
+
+**Quick fixes:**
+```bash
+# Service not responding
+docker-compose restart <service>
+
+# Container issues
+docker-compose down && docker-compose up -d
+
+# Complete reset (⚠️ BACKUP FIRST!)
+docker-compose down -v && docker-compose up -d --build
+```
+
+## �🚢 Deployment
 
 See [Deployment Guide](docs/guides/deployment.md) for production deployment.
 
