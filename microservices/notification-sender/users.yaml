@@ -1,0 +1,34 @@
+# VTRACK Notification Recipients Configuration
+# ==============================================
+# This file defines who receives notifications from the notification-sender service.
+#
+# Each user should have:
+# - name: Display name for logging purposes
+# - telegram_id: Telegram chat ID (get from @userinfobot or similar)
+# - role: Either "admin" or "user"
+#   * admin: Receives all notifications including test messages
+#   * user: Receives only real alerts (no test messages)
+#
+# How to get your Telegram Chat ID:
+# 1. Message @userinfobot on Telegram
+# 2. It will reply with your user ID
+# 3. Use that ID here
+
+users:
+  - name: "Admin User"
+    telegram_id: "123456789"
+    role: "admin"
+  
+  - name: "Regular User 1"
+    telegram_id: "987654321"
+    role: "user"
+  
+  - name: "Regular User 2"
+    telegram_id: "555555555"
+    role: "user"
+
+# Notes:
+# - telegram_id can be a string or int (will be converted to string internally)
+# - Add as many users as needed
+# - At least one admin is recommended for receiving test messages
+# - Remove or comment out users who should not receive notifications
