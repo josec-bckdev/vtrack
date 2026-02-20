@@ -1,0 +1,14 @@
+{
+  "ignorePatterns": [
+    {
+      "pattern": "^http://localhost"
+    },
+    {
+      "pattern": "^https://maps.google.com"
+    }
+  ],
+  "aliveStatusCodes": [200, 206, 429],
+  "timeout": "20s",
+  "retryOn429": true,
+  "retryCount": 2
+}
