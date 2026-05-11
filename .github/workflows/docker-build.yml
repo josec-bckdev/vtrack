@@ -1,0 +1,103 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  docker-compose-validation:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Create .env file for testing
+        run: |
+          cat > .env << EOF
+          POSTGRES_USER=test_user
+          POSTGRES_PASSWORD=test_password
+          POSTGRES_DB=test_db
+          DATABASE_URL=postgresql://test_user:test_password@db:5432/test_db
+          REDIS_URL=redis://redis:6379/0
+          TELEGRAM_BOT_TOKEN=test_token
+          TELEGRAM_CHAT_ID=12345
+          LOGIN_EMAIL=test@example.com
+          LOGIN_PASSWORD=testpass
+          PGADMIN_EMAIL=admin@example.com
+          PGADMIN_PASSWORD=admin
+          EOF
+      
+      - name: Validate docker-compose syntax
+        run: |
+          docker-compose config
+      
+      - name: Build Docker images
+        run: |
+          docker-compose build --parallel
+      
+      - name: Start services
+        run: |
+          docker-compose up -d db redis
+          echo "Waiting for services to be healthy..."
+          sleep 15
+      
+      - name: Check service health
+        run: |
+          docker-compose ps
+          
+          # Check Redis
+          docker-compose exec -T redis redis-cli ping
+          
+          # Check PostgreSQL
+          docker-compose exec -T db pg_isready -U test_user
+      
+      - name: Build and start API service
+        run: |
+          docker-compose up -d api
+          sleep 10
+      
+      - name: Check API health
+        run: |
+          docker-compose logs api
+          # Wait for API to be ready
+          for i in {1..30}; do
+            if curl -f http://localhost:8000/docs > /dev/null 2>&1; then
+              echo "API is healthy!"
+              break
+            fi
+            echo "Waiting for API... ($i/30)"
+            sleep 2
+          done
+      
+      - name: View logs on failure
+        if: failure()
+        run: |
+          docker-compose logs
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          docker-compose down -v
+
+  build-microservices:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        service: [notification-sender, alert-processor]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Build ${{ matrix.service }} image
+        run: |
+          docker build -f microservices/${{ matrix.service }}/Dockerfile -t vtrack-${{ matrix.service }}:test .
+      
+      - name: Inspect image
+        run: |
+          docker images vtrack-${{ matrix.service }}:test
+          docker inspect vtrack-${{ matrix.service }}:test

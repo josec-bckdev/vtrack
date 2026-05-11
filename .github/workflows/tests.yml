@@ -1,0 +1,125 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+      
+      - name: Run main application tests
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379/0
+          TESTING: "1"
+          TELEGRAM_BOT_TOKEN: "test_token_for_ci"
+          TELEGRAM_CHAT_ID: "12345"
+        run: |
+          pytest app/tests/ -v --cov=app --cov-report=xml --cov-report=term-missing
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-vtrack
+          fail_ci_if_error: false
+      
+      - name: Generate coverage badge
+        if: success()
+        run: |
+          COVERAGE=$(python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); print(root.attrib['line-rate'])" 2>/dev/null || echo "0")
+          COVERAGE_PERCENT=$(python -c "print(int(float($COVERAGE) * 100))" 2>/dev/null || echo "0")
+          echo "Coverage: ${COVERAGE_PERCENT}%"
+
+  test-microservices:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        microservice: [notification-sender, alert-processor]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install shared package
+        run: |
+          pip install -e ./shared-package
+      
+      - name: Install ${{ matrix.microservice }} dependencies
+        run: |
+          cd microservices/${{ matrix.microservice }}
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+      
+      - name: Run ${{ matrix.microservice }} tests
+        env:
+          TELEGRAM_BOT_TOKEN: "test_token_for_ci"
+          TELEGRAM_CHAT_ID: "12345"
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          cd microservices/${{ matrix.microservice }}
+          if [ -d tests ]; then
+            pytest -v --tb=short
+          else
+            echo "No tests directory found for ${{ matrix.microservice }}"
+          fi
