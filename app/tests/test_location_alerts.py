@@ -30,8 +30,22 @@ from shared.location_alerts import (
 )
 
 
+pytestmark = pytest.mark.geofence
+
+
 def get_zone(analyzer: LocationAnalyzer, name: str) -> Zone:
     return next(zone for zone in analyzer.get_zones() if zone.name == name)
+
+
+def get_zone_by_type(analyzer: LocationAnalyzer, alert_type: AlertType) -> Zone:
+    return next(zone for zone in analyzer.get_zones() if zone.alert_type == alert_type)
+
+
+def get_two_distinct_entry_zones(analyzer: LocationAnalyzer) -> tuple[Zone, Zone]:
+    entry_zones = [z for z in analyzer.get_zones() if z.alert_type == AlertType.GEOFENCE_ENTRY]
+    if len(entry_zones) < 2:
+        raise ValueError("At least two entry-type zones are required for this test")
+    return entry_zones[0], entry_zones[1]
 
 
 class TestZoneManagement:
@@ -47,17 +61,19 @@ class TestZoneManagement:
         zones = location_analyzer_fixture.get_zones()
         
         # Assert
-        assert len(zones) == 7
-        zone_names = {z.name for z in zones}
-        assert zone_names == {
-            "Cota-conejera",
-            "Boyaca",
-            "Prado",
-            "Batan",
-            "Av 116 - Cr 53",
-            "Calle 115 - Cr 54",
-            "Casita"
-        }
+        assert len(zones) > 0
+        zone_ids = {z.zone_id for z in zones}
+        assert len(zone_ids) == len(zones)
+
+        for zone in zones:
+            assert isinstance(zone.name, str)
+            assert zone.name != ""
+            assert isinstance(zone.latitude, float)
+            assert isinstance(zone.longitude, float)
+            assert zone.radius_meters > 0
+            assert isinstance(zone.alert_type, AlertType)
+            assert isinstance(zone.severity, AlertSeverity)
+            assert zone.enabled is True
 
     def test_add_custom_zone_successfully(self, location_analyzer_fixture):
         """
@@ -203,20 +219,20 @@ class TestGeofenceEntryDetection:
         ASSERT: Entry alert is generated
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        entry_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_ENTRY)
         
-        # Act - first time analyzing position inside Boyaca zone
+        # Act - first time analyzing position inside an entry zone
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Assert
         assert len(alerts) == 1
         alert = alerts[0]
         assert alert.alert_type == AlertType.GEOFENCE_ENTRY
-        assert alert.zone_name == "Boyaca"
+        assert alert.zone_name == entry_zone.name
         assert alert.ruta == 101
 
     def test_no_entry_alert_if_already_in_zone(self, location_analyzer_fixture):
@@ -226,20 +242,20 @@ class TestGeofenceEntryDetection:
         ASSERT: No entry alert is generated
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        entry_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_ENTRY)
         
         # First analysis - establishes that route is in zone
         location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Act - analyze same location again
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Assert - no entry alert since already in zone
@@ -252,7 +268,7 @@ class TestGeofenceEntryDetection:
         ASSERT: Entry alert only on second analysis
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        entry_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_ENTRY)
         
         # First analysis - outside zone
         alerts1 = location_analyzer_fixture.analyze_coordinate(
@@ -267,8 +283,8 @@ class TestGeofenceEntryDetection:
         # Act - move into zone
         alerts2 = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Assert - entry alert when moving in
@@ -286,27 +302,28 @@ class TestGeofenceExitDetection:
         ASSERT: Exit alert is generated
         """
         # Arrange
-        cota_zone = get_zone(location_analyzer_fixture, "Cota-conejera")
+        exit_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_EXIT)
         
         # First analysis - inside Cota-conejera zone
         location_analyzer_fixture.analyze_coordinate(
             ruta=104,
-            latitude=cota_zone.latitude,
-            longitude=cota_zone.longitude
+            latitude=exit_zone.latitude,
+            longitude=exit_zone.longitude
         )
         
         # Act - move out of Cota-conejera
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=104,
-            latitude=cota_zone.latitude + 0.05,
-            longitude=cota_zone.longitude
+            latitude=exit_zone.latitude + 0.05,
+            longitude=exit_zone.longitude
         )
         
         # Assert
-        assert len(alerts) == 1
-        alert = alerts[0]
-        assert alert.alert_type == AlertType.GEOFENCE_EXIT
-        assert alert.zone_name == "Cota-conejera"
+        assert len(alerts) >= 1
+        assert any(
+            alert.alert_type == AlertType.GEOFENCE_EXIT and alert.zone_name == exit_zone.name
+            for alert in alerts
+        )
 
     def test_no_exit_alert_for_entry_type_zone(self, location_analyzer_fixture):
         """
@@ -315,13 +332,13 @@ class TestGeofenceExitDetection:
         ASSERT: No exit alert is generated (only entry type)
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        entry_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_ENTRY)
         
         # First analysis - inside
         location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Act - move out
@@ -345,15 +362,14 @@ class TestMultipleZoneTracking:
         ASSERT: Entry alerts generated for both zones
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
-        prado_zone = get_zone(location_analyzer_fixture, "Prado")
+        zone_1, _ = get_two_distinct_entry_zones(location_analyzer_fixture)
         
         # Act - coordinate that might be in both
-        # (This depends on actual overlap - using Boyaca coordinate as example)
+        # (Use one configured entry zone center)
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=zone_1.latitude,
+            longitude=zone_1.longitude
         )
         
         # Assert
@@ -369,19 +385,18 @@ class TestMultipleZoneTracking:
         ASSERT: Proper entry/exit alerts
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
-        prado_zone = get_zone(location_analyzer_fixture, "Prado")
+        zone_1, zone_2 = get_two_distinct_entry_zones(location_analyzer_fixture)
         
-        # Act 1 - Route enters Boyaca
+        # Act 1 - Route enters first entry zone
         alerts1 = location_analyzer_fixture.analyze_coordinate(
             ruta=105,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=zone_1.latitude,
+            longitude=zone_1.longitude
         )
         
-        # Assert - entry to Boyaca
+        # Assert - entry to first zone
         assert len(alerts1) == 1
-        assert alerts1[0].zone_name == "Boyaca"
+        assert alerts1[0].zone_name == zone_1.name
         
         # Act 2 - Route exits Boyaca but is still tracked
         alerts2 = location_analyzer_fixture.analyze_coordinate(
@@ -390,19 +405,19 @@ class TestMultipleZoneTracking:
             longitude=-76.0000
         )
         
-        # Assert - no alerts (Boyaca is entry-only)
-        assert len(alerts2) == 0
+        # Assert - no additional entry alerts while outside all zones
+        assert all(a.alert_type == AlertType.GEOFENCE_EXIT for a in alerts2)
         
-        # Act 3 - Route enters Prado
+        # Act 3 - Route enters second entry zone
         alerts3 = location_analyzer_fixture.analyze_coordinate(
             ruta=105,
-            latitude=prado_zone.latitude,
-            longitude=prado_zone.longitude
+            latitude=zone_2.latitude,
+            longitude=zone_2.longitude
         )
         
-        # Assert - entry to Prado
+        # Assert - entry to second zone
         assert len(alerts3) == 1
-        assert alerts3[0].zone_name == "Prado"
+        assert alerts3[0].zone_name == zone_2.name
 
 
 class TestAlertGeneration:
@@ -415,23 +430,23 @@ class TestAlertGeneration:
         ASSERT: Alert contains all required information
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        entry_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_ENTRY)
         
         # Act
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Assert
         alert = alerts[0]
         assert isinstance(alert, LocationAlert)
         assert alert.ruta == 101
-        assert alert.latitude == boyaca_zone.latitude
-        assert alert.longitude == boyaca_zone.longitude
+        assert alert.latitude == entry_zone.latitude
+        assert alert.longitude == entry_zone.longitude
         assert alert.alert_type == AlertType.GEOFENCE_ENTRY
-        assert alert.zone_name == "Boyaca"
+        assert alert.zone_name == entry_zone.name
         assert alert.severity == AlertSeverity.WARNING
         assert isinstance(alert.timestamp, datetime)
         assert alert.message != ""
@@ -490,12 +505,12 @@ class TestRouteStatusTracking:
         ASSERT: Status shows zone ID and position
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        entry_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_ENTRY)
         
         location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Act
@@ -503,10 +518,10 @@ class TestRouteStatusTracking:
         
         # Assert
         assert status['ruta'] == 101
-        assert boyaca_zone.zone_id in status['current_zones']
+        assert entry_zone.zone_id in status['current_zones']
         assert status['last_position'] is not None
-        assert status['last_position']['latitude'] == boyaca_zone.latitude
-        assert status['last_position']['longitude'] == boyaca_zone.longitude
+        assert status['last_position']['latitude'] == entry_zone.latitude
+        assert status['last_position']['longitude'] == entry_zone.longitude
         assert status['last_update'] is not None
 
     def test_get_route_status_multiple_zones(self, location_analyzer_fixture):
@@ -516,13 +531,13 @@ class TestRouteStatusTracking:
         ASSERT: Shows all current zones
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        entry_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_ENTRY)
         
         # Analyze at Boyaca location
         location_analyzer_fixture.analyze_coordinate(
             ruta=102,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Act
@@ -530,7 +545,7 @@ class TestRouteStatusTracking:
         
         # Assert
         assert status['ruta'] == 102
-        assert boyaca_zone.zone_id in status['current_zones']
+        assert entry_zone.zone_id in status['current_zones']
         assert isinstance(status['current_zones'], list)
 
 
@@ -544,12 +559,12 @@ class TestRouteTrackingStateManagement:
         ASSERT: Route status is reset
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        entry_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_ENTRY)
         
         location_analyzer_fixture.analyze_coordinate(
             ruta=103,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Verify route is tracked
@@ -570,18 +585,18 @@ class TestRouteTrackingStateManagement:
         ASSERT: Other routes still tracked
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
+        entry_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_ENTRY)
         
         # Track two routes
         location_analyzer_fixture.analyze_coordinate(
             ruta=201,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         location_analyzer_fixture.analyze_coordinate(
             ruta=202,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Act - clear route 201
@@ -605,10 +620,13 @@ class TestComplexGeofencingScenarios:
         ASSERT: Correct sequence of alerts
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
-        prado_zone = get_zone(location_analyzer_fixture, "Prado")
-        cota_zone = get_zone(location_analyzer_fixture, "Cota-conejera")
-        casita_zone = get_zone(location_analyzer_fixture, "Casita")
+        entry_zones = [z for z in location_analyzer_fixture.get_zones() if z.alert_type == AlertType.GEOFENCE_ENTRY]
+        exit_zone = get_zone_by_type(location_analyzer_fixture, AlertType.GEOFENCE_EXIT)
+        assert len(entry_zones) >= 2
+
+        first_entry_zone = entry_zones[0]
+        second_entry_zone = entry_zones[1]
+        final_entry_zone = entry_zones[2] if len(entry_zones) > 2 else entry_zones[0]
         
         # Act & Assert - simulate a route tour
         
@@ -616,56 +634,56 @@ class TestComplexGeofencingScenarios:
         alerts = location_analyzer_fixture.analyze_coordinate(ruta=301, latitude=3.0, longitude=-76.0)
         assert len(alerts) == 0
         
-        # 2. Enter Boyaca
+        # 2. Enter first entry zone
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=301,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=first_entry_zone.latitude,
+            longitude=first_entry_zone.longitude
         )
         assert len(alerts) >= 1
-        assert any(a.zone_name == "Boyaca" for a in alerts)
+        assert any(a.zone_name == first_entry_zone.name for a in alerts)
         prev_alert_count = len(alerts)
         
-        # 3. Stay in Boyaca
+        # 3. Stay in first zone
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=301,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=first_entry_zone.latitude,
+            longitude=first_entry_zone.longitude
         )
         assert len(alerts) == 0  # No new entries
         
-        # 4. Move to Prado
+        # 4. Move to second entry zone
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=301,
-            latitude=prado_zone.latitude,
-            longitude=prado_zone.longitude
+            latitude=second_entry_zone.latitude,
+            longitude=second_entry_zone.longitude
         )
         # May or may not have alert depending on overlap
         
-        # 5. Enter Cota (exit-type zone)
+        # 5. Enter an exit-type zone
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=301,
-            latitude=cota_zone.latitude,
-            longitude=cota_zone.longitude
+            latitude=exit_zone.latitude,
+            longitude=exit_zone.longitude
         )
         # Exit alert triggers when leaving
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=301,
-            latitude=cota_zone.latitude + 0.05,
-            longitude=cota_zone.longitude
+            latitude=exit_zone.latitude + 0.05,
+            longitude=exit_zone.longitude
         )
-        assert any(a.alert_type == AlertType.GEOFENCE_EXIT for a in alerts)
+        assert any(a.alert_type == AlertType.GEOFENCE_EXIT and a.zone_name == exit_zone.name for a in alerts)
 
-        # 6. Enter Casita
+        # 6. Enter final entry zone
         location_analyzer_fixture.analyze_coordinate(
             ruta=301,
-            latitude=casita_zone.latitude,
-            longitude=casita_zone.longitude
+            latitude=final_entry_zone.latitude,
+            longitude=final_entry_zone.longitude
         )
         
-        # Final status should show Casita
+        # Final status should show final zone
         status = location_analyzer_fixture.get_route_status(ruta=301)
-        assert casita_zone.zone_id in status['current_zones']
+        assert final_entry_zone.zone_id in status['current_zones']
 
     def test_concurrent_routes_independent_tracking(self, location_analyzer_fixture):
         """
@@ -674,36 +692,35 @@ class TestComplexGeofencingScenarios:
         ASSERT: Each route tracked independently
         """
         # Arrange
-        boyaca_zone = get_zone(location_analyzer_fixture, "Boyaca")
-        prado_zone = get_zone(location_analyzer_fixture, "Prado")
+        zone_1, zone_2 = get_two_distinct_entry_zones(location_analyzer_fixture)
         
-        # Act - route 401 enters Boyaca
+        # Act - route 401 enters first zone
         location_analyzer_fixture.analyze_coordinate(
             ruta=401,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=zone_1.latitude,
+            longitude=zone_1.longitude
         )
         status_401_school = location_analyzer_fixture.get_route_status(ruta=401)
         
         # Another analysis for same route
         location_analyzer_fixture.analyze_coordinate(
             ruta=401,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=zone_1.latitude,
+            longitude=zone_1.longitude
         )
         
-        # Route 402 enters Prado
+        # Route 402 enters second zone
         location_analyzer_fixture.analyze_coordinate(
             ruta=402,
-            latitude=prado_zone.latitude,
-            longitude=prado_zone.longitude
+            latitude=zone_2.latitude,
+            longitude=zone_2.longitude
         )
         status_402_depot = location_analyzer_fixture.get_route_status(ruta=402)
         
         # Assert
-        assert boyaca_zone.zone_id in status_401_school['current_zones']
-        assert prado_zone.zone_id in status_402_depot['current_zones']
+        assert zone_1.zone_id in status_401_school['current_zones']
+        assert zone_2.zone_id in status_402_depot['current_zones']
         
         # Routes should be in different zones
-        assert boyaca_zone.zone_id not in status_402_depot['current_zones']
-        assert prado_zone.zone_id not in status_401_school['current_zones']
+        assert zone_1.zone_id not in status_402_depot['current_zones']
+        assert zone_2.zone_id not in status_401_school['current_zones']

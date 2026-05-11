@@ -211,6 +211,8 @@ class TestCoordinateQueueDataFlow:
 class TestAlertQueueIntegration:
     """Tests for alert queue integration with rest of system."""
 
+    pytestmark = pytest.mark.geofence
+
     def test_queue_alert_from_geofence_analyzer(self, message_queue_fixture, location_analyzer_fixture):
         """
         Alert generated from geofence analyzer should queue properly
@@ -220,16 +222,16 @@ class TestAlertQueueIntegration:
         # Arrange
         queue = message_queue_fixture
         
-        boyaca_zone = next(
+        entry_zone = next(
             zone for zone in location_analyzer_fixture.get_zones()
-            if zone.name == "Boyaca"
+            if zone.alert_type == AlertType.GEOFENCE_ENTRY
         )
         
         # Generate alert from analyzer
         alerts = location_analyzer_fixture.analyze_coordinate(
             ruta=101,
-            latitude=boyaca_zone.latitude,
-            longitude=boyaca_zone.longitude
+            latitude=entry_zone.latitude,
+            longitude=entry_zone.longitude
         )
         
         # Act - queue the alert
@@ -248,7 +250,7 @@ class TestAlertQueueIntegration:
         assert queued_alert is not None
         assert queued_alert['ruta'] == 101
         assert queued_alert['alert_type'] == 'GEOFENCE_ENTRY'
-        assert queued_alert['area_name'] == 'Boyaca'
+        assert queued_alert['area_name'] == entry_zone.name
 
     def test_alert_queue_severity_levels(self, message_queue_fixture):
         """
