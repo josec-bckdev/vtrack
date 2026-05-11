@@ -15,17 +15,15 @@
 # 3. Use that ID here
 
 users:
-  - name: "Admin User"
-    telegram_id: "123456789"
+  - name: "JCAdmin"
+    telegram_id: "6569702107"
     role: "admin"
   
-  - name: "Regular User 1"
-    telegram_id: "987654321"
+  - name: "LinaT"
+    telegram_id: "8536952176"
     role: "user"
   
-  - name: "Regular User 2"
-    telegram_id: "555555555"
-    role: "user"
+
 
 # Notes:
 # - telegram_id can be a string or int (will be converted to string internally)

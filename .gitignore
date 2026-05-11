@@ -1,7 +1,9 @@
-# Environment variables
+# Environment variables and sensitive data
+microservices/notification-sender/users.yaml
 .env
 *.env
 .env.*
+*users.yaml
 
 # Python cache
 __pycache__/
@@ -26,9 +28,11 @@ ENV/
 .vscode/
 vtrack-beast.code-workspace
 vtrack.code-workspace
+
 #Tools
 .husky/
 node_modules/
 package-lock.json
+
 #scratchpad files
 design-docs/*
