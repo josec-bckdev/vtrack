@@ -154,6 +154,109 @@ async def health():
     """Simple health endpoint for load balancers and checks."""
     return {"status": "ok"}
 
+@app.post("/session/set-cookies")
+async def set_session_cookies(cookies: dict):
+    """
+    Set authenticated session cookies from browser to bypass Cloudflare bot challenge.
+
+    The site uses Cloudflare Bot Management which requires solving a challenge in a browser.
+    Once authenticated, copy your cookies and send them here.
+
+    Required cookies (from browser DevTools > Application > Cookies > rutasljrj.net):
+    - cf_clearance: Cloudflare bot challenge token (proves human verification)
+    - ci_session: CodeIgniter session ID (set after login)
+
+    Steps:
+    1. Open https://www.rutasljrj.net/rastreo/ljrj/login in your browser
+    2. Login with credentials (may need to solve CAPTCHA)
+    3. Open DevTools (F12) > Application > Cookies > www.rutasljrj.net
+    4. Copy cf_clearance and ci_session values
+    5. Send them to this endpoint
+
+    Example curl:
+    curl -X POST http://localhost:8000/session/set-cookies \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "cf_clearance": "NjCkl95e1sGaQMK5zpvVhWHQlqinqGuPvjNLB4PoFG4-1775504603...",
+        "ci_session": "tsp9aiaibccvlqs7ku4nib0notg9hn4m"
+      }'
+    """
+    try:
+        if not cookies:
+            raise ValueError("No cookies provided")
+
+        collection_manager._session_cookies = cookies
+        collection_manager._last_login_time = datetime.now(ZoneInfo("America/Bogota"))
+        logger.info(f"Session cookies set manually ({len(cookies)} cookies): {list(cookies.keys())}")
+        return {
+            "message": "Cookies set successfully",
+            "session_valid": collection_manager._is_session_valid(),
+            "cookies_set": list(cookies.keys()),
+            "cookies_count": len(cookies),
+            "expires_in_hours": 1.5
+        }
+    except Exception as e:
+        logger.error(f"Failed to set cookies: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/session/status")
+async def get_session_status():
+    """
+    Check current session status and time until expiry.
+    Cookies expire after 2 hours - refresh before expiry using /session/set-cookies
+
+    Response:
+    {
+        "status": "valid" | "expired" | "no_session",
+        "message": "...",
+        "expires_in_minutes": int,
+        "set_at": "ISO timestamp",
+        "refresh_instructions": "How to refresh if expired"
+    }
+    """
+    if not collection_manager._last_login_time:
+        return {
+            "status": "no_session",
+            "message": "No session set. Initialize with POST /session/set-cookies",
+            "expires_in_seconds": None,
+            "expires_in_minutes": None,
+            "refresh_instructions": (
+                "1. Go to: https://www.rutasljrj.net/rastreo/ljrj/login\n"
+                "2. Login with credentials\n"
+                "3. Open DevTools (F12) > Application > Cookies\n"
+                "4. Copy cf_clearance and ci_session cookies\n"
+                "5. POST them to /session/set-cookies endpoint"
+            )
+        }
+
+    time_since_login = datetime.now(ZoneInfo("America/Bogota")) - collection_manager._last_login_time
+    total_lifetime = timedelta(hours=1.5)
+    time_remaining = total_lifetime - time_since_login
+
+    is_valid = collection_manager._is_session_valid()
+
+    response = {
+        "status": "valid" if is_valid else "expired",
+        "message": "✓ Session is valid" if is_valid else "✗ Session expired - refresh needed",
+        "set_at": collection_manager._last_login_time.isoformat(),
+        "expires_in_seconds": max(0, int(time_remaining.total_seconds())),
+        "expires_in_minutes": max(0, int(time_remaining.total_seconds() / 60)),
+        "cookies": list(collection_manager._session_cookies.keys()) if collection_manager._session_cookies else []
+    }
+
+    if not is_valid:
+        response["refresh_instructions"] = (
+            "Session EXPIRED. To refresh:\n"
+            "1. Go to: https://www.rutasljrj.net/rastreo/ljrj/login\n"
+            "2. Login and solve any Cloudflare challenges\n"
+            "3. Extract cf_clearance and ci_session cookies\n"
+            "4. POST: curl -X POST http://localhost:8000/session/set-cookies -H 'Content-Type: application/json' "
+            "-d '{\"cf_clearance\": \"...\", \"ci_session\": \"...\"}'"
+        )
+
+    return response
+
+
 @app.post("/fetch-remote-data")
 async def fetch_data_from_remote_service():
     """

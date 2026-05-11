@@ -27,7 +27,7 @@ ESTADOS_URL = "https://www.rutasljrj.net/rastreo/ljrj/admin/responsables/control
 RESPONSABLE_PROFILE_ID_LOGIN = "35"
 RESPONSABLE_PROFILE_ID_ESTADOS = "867"
 COLLECTION_INTERVAL_SECONDS = 15
-SESSION_EXPIRY_HOURS = 12
+SESSION_EXPIRY_HOURS = 1.5  # Cloudflare cookies expire at 2 hours, refresh at 1.5 to be safe
 
 SCRAPER_EMAIL = os.environ.get("SCRAPER_EMAIL")
 SCRAPER_PASSWORD = os.environ.get("SCRAPER_PASSWORD")
@@ -104,17 +104,19 @@ class AsyncCollectionManager:
             'clave': SCRAPER_PASSWORD,
             'perfil': RESPONSABLE_PROFILE_ID_LOGIN
         }
-        
+
         logger.info(f"Logging in to {LOGIN_URL}...")
         login_response = await client.post(LOGIN_URL, data=login_data)
-        
+
         if login_response.status_code in [200, 303]:
             logger.info("Login successful")
             self._last_login_time = datetime.now(ZoneInfo("America/Bogota"))
             self._session_cookies = dict(login_response.cookies)
             return True
-        
+
         logger.error(f"Login failed: {login_response.status_code}")
+        logger.debug(f"Response body (first 500 chars): {login_response.text[:500]}")
+        logger.debug(f"Response headers: {dict(login_response.headers)}")
         return False
 
     def _is_session_valid(self) -> bool:
@@ -131,8 +133,9 @@ class AsyncCollectionManager:
                     client.cookies.set(cookie_name, cookie_value)
                 return True
             else:
-                logger.info("Performing fresh login")
-                return await self._login_async(client)
+                # Session expired - cannot auto-login due to Cloudflare bot challenge
+                logger.error("Session expired (Cloudflare cookies TTL=2h). Manual refresh required via /session/set-cookies endpoint")
+                return False
 
     def _get_unique_timestamp_param(self) -> dict:
         """Returns a timestamp parameter dict to bypass server-side response caching."""
@@ -183,32 +186,59 @@ class AsyncCollectionManager:
 
         # Create persistent client on first use, reuse for subsequent requests
         if self._client is None:
-            self._client = httpx.AsyncClient(follow_redirects=False)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+            }
+            self._client = httpx.AsyncClient(follow_redirects=True, headers=headers)
             logger.info("Created persistent httpx client for session reuse")
-        
+
         client = self._client
-        
+
         try:
             if not await self._ensure_valid_session(client):
-                raise RequestError("Failed to establish valid session")
+                error_msg = (
+                    "Session expired or invalid. Cloudflare cookies must be manually refreshed.\n"
+                    "1. Login to: https://www.rutasljrj.net/rastreo/ljrj/login\n"
+                    "2. Extract cookies (cf_clearance, ci_session) from browser DevTools\n"
+                    "3. POST to: /session/set-cookies with the cookies\n"
+                    "See GET /session/status for expiry time."
+                )
+                logger.error(error_msg)
+                raise RequestError(error_msg)
 
             try:
                 return await self._fetch_data_with_session(client)
             except (RequestError, httpx.HTTPStatusError) as e:
-                logger.warning(f"Data fetch failed, re-logging in: {e}")
+                logger.warning(f"Data fetch failed: {e}")
+
+                # Check if it's a redirect (303) which indicates session expired
+                if "303" in str(e) or "Forbidden" in str(e):
+                    error_msg = (
+                        "Session expired (got redirect). Cloudflare cookies need manual refresh.\n"
+                        "POST fresh cookies to /session/set-cookies endpoint."
+                    )
+                    logger.error(error_msg)
+                    raise RequestError(error_msg)
+
+                # For other errors, try one more time with fresh session
+                logger.info("Trying fresh session...")
                 async with self._session_lock:
                     self._session_cookies = None
                     self._last_login_time = None
-                
+
                 if not await self._ensure_valid_session(client):
-                    raise RequestError("Failed to re-establish session")
-                
+                    raise RequestError("Failed to establish valid session - manual cookie refresh required")
+
                 return await self._fetch_data_with_session(client)
+
         except Exception as e:
             # On any error, close the client so it gets recreated fresh on next attempt
             logger.warning(f"Error during fetch, will close and recreate client: {e}")
             if self._client:
-                await self._client.aclose()
+                try:
+                    await self._client.aclose()
+                except:
+                    pass
                 self._client = None
             raise
 
