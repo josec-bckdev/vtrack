@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cookie to JSON Converter - Dark Mode with Syntax Highlighting</title>
+    <style>
+        /* Dark mode theme */
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-secondary: #141a2a;
+            --bg-tertiary: #1e2738;
+            --text-primary: #e4e6eb;
+            --text-secondary: #b0b8c5;
+            --border: #2a3448;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid var(--border);
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: var(--text-secondary);
+        }
+        
+        /* Input section */
+        .input-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+        
+        .input-section label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        textarea {
+            width: 100%;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'Courier New', 'Monaco', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            resize: vertical;
+        }
+        
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        /* Button group */
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        button:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+            transform: translateY(-1px);
+        }
+        
+        button.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+        
+        button.primary:hover {
+            background: var(--accent-hover);
+        }
+        
+        button.success {
+            background: var(--success);
+            border-color: var(--success);
+        }
+        
+        /* Output section */
+        .output-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        
+        .output-header {
+            background: var(--bg-tertiary);
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .output-header h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        
+        .output-controls {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .output-controls button {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        
+        .result-box {
+            background: #0d1117;
+            padding: 20px;
+            max-height: 500px;
+            overflow: auto;
+            position: relative;
+        }
+        
+        #output {
+            margin: 0;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        
+        /* Syntax highlighting colors for dark mode */
+        .json-key {
+            color: #79c0ff;
+            font-weight: 500;
+        }
+        
+        .json-string {
+            color: #a5d6ff;
+        }
+        
+        .json-number {
+            color: #79c0ff;
+        }
+        
+        .json-boolean {
+            color: #ff7b72;
+        }
+        
+        .json-null {
+            color: #ff7b72;
+        }
+        
+        /* Status message */
+        .status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--bg-tertiary);
+            border-left: 4px solid var(--success);
+            padding: 12px 20px;
+            border-radius: 8px;
+            display: none;
+            animation: slideIn 0.3s ease;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: var(--bg-tertiary);
+            border-radius: 5px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 5px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent);
+        }
+        
+        /* Badge */
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-family: monospace;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .button-group {
+                flex-direction: column;
+            }
+            
+            button {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🍪 Cookie to JSON Converter</h1>
+            <p>Parse cookie strings to formatted JSON with syntax highlighting</p>
+        </div>
+        
+        <div class="input-section">
+            <label>📝 Cookie String Input:</label>
+            <textarea id="cookieInput" rows="4" placeholder="Enter cookie string here...">cf_clearance=sLXGB1CSD.ukW6ivL7vzfKpexVbWb9T2t8Xlhh1x1SY-1776252499-1.2.1.1-fK42GHqrI1.7TSkdar5aIk.Ihs1wVnm9U6JoEPjSCgMkDMCcO2UpMmNmajkBrbmCBm6.ArdVAzJzVYkJd9uc9To40Dx3gQtUY8cGZVF.2SaJt.3X8NFsXW7eLf8tq2Wc3nWcj2plkEpw.mYVhnX8dQCs_8ToVRPSoW.D2I8nH53Hd3V.4DFrKt6wvgEgC7Gz36qM3LhO2AqfoxOh3ryu9i.l3y5XuMwcgTg3Nbi1F1dnU45bnPX5jEptStlVsVSE8j2JXk7IOVxTeKcvE1NScMyg.K25a5_0N9xjTWtTh51W176Hw9pDO_omAbpsDqkZVuYrywSWtO0F2i1NtAcRBw; ci_session=inpba9lea3gelnl33gvsl1mq2d4tksvf</textarea>
+            
+            <div class="button-group">
+                <button class="primary" onclick="convertCookie()">
+                    🔄 Convert to JSON
+                </button>
+                <button onclick="copyToClipboard()">
+                    📋 Copy JSON
+                </button>
+                <button onclick="downloadJSON()">
+                    💾 Download JSON
+                </button>
+                <button onclick="clearAll()">
+                    🗑️ Clear All
+                </button>
+            </div>
+        </div>
+        
+        <div class="output-section">
+            <div class="output-header">
+                <h3>📄 JSON Output with Syntax Highlighting</h3>
+                <div class="output-controls">
+                    <button onclick="toggleWordWrap()" id="wrapToggleBtn">
+                        📏 Toggle Wrap
+                    </button>
+                    <button onclick="expandOutput()">
+                        🔍 Expand View
+                    </button>
+                </div>
+            </div>
+            <div class="result-box" id="resultBox">
+                <pre id="output"></pre>
+            </div>
+        </div>
+    </div>
+    
+    <div id="status" class="status"></div>
+
+    <script>
+        let wrapMode = true;
+        
+        // Syntax highlighting function
+        function syntaxHighlightJSON(json) {
+            // Escape HTML special characters
+            json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            
+            // Regular expression to match JSON tokens
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function(match) {
+                let className = 'json-number';
+                
+                // Check if it's a string
+                if (/^"/.test(match)) {
+                    // Check if it's a key (ends with colon)
+                    if (/:$/.test(match)) {
+                        className = 'json-key';
+                        // Remove the colon for display, add it back after styling
+                        match = match.slice(0, -1);
+                        return '<span class="' + className + '">' + match + '</span>:';
+                    } else {
+                        className = 'json-string';
+                        return '<span class="' + className + '">' + match + '</span>';
+                    }
+                } 
+                // Check for boolean
+                else if (/true|false/.test(match)) {
+                    className = 'json-boolean';
+                    return '<span class="' + className + '">' + match + '</span>';
+                } 
+                // Check for null
+                else if (/null/.test(match)) {
+                    className = 'json-null';
+                    return '<span class="' + className + '">' + match + '</span>';
+                }
+                // Numbers
+                else {
+                    return '<span class="' + className + '">' + match + '</span>';
+                }
+            });
+        }
+        
+        // Parse cookies to object
+        function parseCookies(cookieString) {
+            const pairs = cookieString.split('; ');
+            const cookieObject = {};
+            
+            for (let i = 0; i < pairs.length; i++) {
+                if (pairs[i].includes('=')) {
+                    const [key, value] = pairs[i].split('=');
+                    if (key && value) {
+                        cookieObject[key.trim()] = value.trim();
+                    }
+                }
+            }
+            
+            return cookieObject;
+        }
+        
+        // Main conversion function
+        function convertCookie() {
+            const input = document.getElementById('cookieInput').value;
+            
+            if (!input.trim()) {
+                showStatus('⚠️ Please enter a cookie string', 'warning');
+                return;
+            }
+            
+            try {
+                const obj = parseCookies(input);
+                const jsonString = JSON.stringify(obj, null, 2);
+                const highlightedJSON = syntaxHighlightJSON(jsonString);
+                document.getElementById('output').innerHTML = highlightedJSON;
+                showStatus('✅ Successfully converted to JSON!', 'success');
+            } catch (error) {
+                showStatus('❌ Error parsing cookies: ' + error.message, 'error');
+                console.error(error);
+            }
+        }
+        
+        // Copy to clipboard
+        async function copyToClipboard() {
+            const outputElement = document.getElementById('output');
+            // Get plain text without HTML tags
+            const plainText = outputElement.textContent;
+            
+            try {
+                await navigator.clipboard.writeText(plainText);
+                showStatus('📋 JSON copied to clipboard!', 'success');
+            } catch (err) {
+                // Fallback for older browsers
+                const textarea = document.createElement('textarea');
+                textarea.value = plainText;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showStatus('📋 JSON copied to clipboard!', 'success');
+            }
+        }
+        
+        // Download as JSON file
+        function downloadJSON() {
+            const outputElement = document.getElementById('output');
+            const jsonText = outputElement.textContent;
+            
+            if (!jsonText || jsonText === '{}') {
+                showStatus('⚠️ Nothing to download', 'warning');
+                return;
+            }
+            
+            const blob = new Blob([jsonText], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `cookies_${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showStatus('💾 JSON file downloaded!', 'success');
+        }
+        
+        // Clear all inputs and output
+        function clearAll() {
+            document.getElementById('cookieInput').value = '';
+            document.getElementById('output').innerHTML = '';
+            showStatus('🗑️ All cleared', 'success');
+        }
+        
+        // Toggle word wrap
+        function toggleWordWrap() {
+            const output = document.getElementById('output');
+            const resultBox = document.querySelector('.result-box');
+            const toggleBtn = document.getElementById('wrapToggleBtn');
+            
+            wrapMode = !wrapMode;
+            
+            if (wrapMode) {
+                output.style.whiteSpace = 'pre-wrap';
+                output.style.wordBreak = 'break-word';
+                resultBox.style.overflowX = 'auto';
+                toggleBtn.innerHTML = '📏 Wrap: ON';
+                showStatus('Word wrap enabled', 'info');
+            } else {
+                output.style.whiteSpace = 'pre';
+                output.style.wordBreak = 'normal';
+                resultBox.style.overflowX = 'auto';
+                toggleBtn.innerHTML = '📏 Wrap: OFF';
+                showStatus('Word wrap disabled (use horizontal scroll)', 'info');
+            }
+        }
+        
+        // Expand output view
+        function expandOutput() {
+            const resultBox = document.querySelector('.result-box');
+            const currentMaxHeight = resultBox.style.maxHeight;
+            
+            if (!currentMaxHeight || currentMaxHeight === '500px') {
+                resultBox.style.maxHeight = '800px';
+                showStatus('🔍 View expanded', 'info');
+            } else {
+                resultBox.style.maxHeight = '500px';
+                showStatus('📐 View collapsed', 'info');
+            }
+        }
+        
+        // Show status message
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            
+            // Change border color based on type
+            const colors = {
+                success: '#10b981',
+                error: '#ef4444',
+                warning: '#f59e0b',
+                info: '#3b82f6'
+            };
+            statusDiv.style.borderLeftColor = colors[type] || colors.info;
+            
+            // Auto hide after 3 seconds
+            setTimeout(() => {
+                statusDiv.style.opacity = '0';
+                setTimeout(() => {
+                    statusDiv.style.display = 'none';
+                    statusDiv.style.opacity = '1';
+                }, 300);
+            }, 3000);
+        }
+        
+        // Auto-convert on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            convertCookie();
+            
+            // Optional: Add keyboard shortcut (Ctrl+Enter to convert)
+            document.getElementById('cookieInput').addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    convertCookie();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
