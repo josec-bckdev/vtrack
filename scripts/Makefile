@@ -146,6 +146,9 @@ test-debug-help: ## Show test debugging commands reference
 test-run: ## Run test debugging script
 	python ./run_test_debug.py
 
+test-geofence: ## Run only geofence/location analyzer tests
+	cd .. && PYTHONPATH=$$PWD/shared-package/src:$$PYTHONPATH ./.venv/bin/python -m pytest -m geofence -v
+
 ##@ Development Setup
 install-shared: ## Install/update the shared package
 	./microservices.sh install-shared
