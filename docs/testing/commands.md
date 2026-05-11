@@ -30,6 +30,9 @@ pytest app/tests/test_scraper_async.py -v
 
 # Phase 3: API Endpoints (Integration)
 pytest app/tests/test_api_endpoints.py -v
+
+# Geofence tests only (location analyzer + geofence integrations)
+PYTHONPATH=/home/bu/PythonCode/vtrack/shared-package/src:$PYTHONPATH pytest -m geofence -v
 ```
 
 ## Debugging

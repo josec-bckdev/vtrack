@@ -157,6 +157,9 @@ pytest -m integration
 # Run only async tests
 pytest -m asyncio
 
+# Run only geofence/location analyzer tests
+PYTHONPATH=/home/bu/PythonCode/vtrack/shared-package/src:$PYTHONPATH pytest -m geofence -v
+
 # Skip slow tests
 pytest -m "not slow"
 ```
