@@ -55,7 +55,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: redis://redis:6379/0
-      COOKIE_REFRESHER_URL: http://cookie-refresher:8001
+      COOKIE_REFRESHER_URL: ${COOKIE_REFRESHER_URL}
       PYTHONPATH: /app
     ports:
       - "8000:8000"

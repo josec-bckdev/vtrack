@@ -27,7 +27,7 @@ RESPONSABLE_PROFILE_ID_ESTADOS = "867"
 COLLECTION_INTERVAL_SECONDS = 15
 SESSION_EXPIRY_HOURS = 1.5  # Cloudflare cookies expire at 2 hours, refresh at 1.5 to be safe
 
-COOKIE_REFRESHER_URL = os.environ.get("COOKIE_REFRESHER_URL", "http://cookie-refresher:8001")
+COOKIE_REFRESHER_URL = os.environ.get("COOKIE_REFRESHER_URL", "http://localhost:8001")
 COOKIE_REFRESHER_TIMEOUT = 300  # seconds — agent loop takes ~18 steps / ~3 min
 
 collection_manager = None
