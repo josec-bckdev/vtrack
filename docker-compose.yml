@@ -174,3 +174,4 @@ volumes:
 networks:
   vtrack-network:
     driver: bridge
+    name: vtrack-network
