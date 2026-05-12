@@ -29,6 +29,9 @@ ENV/
 # Allow .github/ for CI/CD workflows
 # .github/ is NOT ignored
 
+# Separate Microservices
+microservices/cookie-refresher/
+
 #VS Code
 .devcontainer/
 .vscode/
