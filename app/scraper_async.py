@@ -21,16 +21,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-LOGIN_URL = "https://www.rutasljrj.net/rastreo/ljrj/login/validacion"
 VALORES_URL = "https://www.rutasljrj.net/rastreo/ljrj/admin/responsables/control/actualizaValores"
 ESTADOS_URL = "https://www.rutasljrj.net/rastreo/ljrj/admin/responsables/control/obtieneEstados"
-RESPONSABLE_PROFILE_ID_LOGIN = "35"
 RESPONSABLE_PROFILE_ID_ESTADOS = "867"
 COLLECTION_INTERVAL_SECONDS = 15
 SESSION_EXPIRY_HOURS = 1.5  # Cloudflare cookies expire at 2 hours, refresh at 1.5 to be safe
 
-SCRAPER_EMAIL = os.environ.get("SCRAPER_EMAIL")
-SCRAPER_PASSWORD = os.environ.get("SCRAPER_PASSWORD")
+COOKIE_REFRESHER_URL = os.environ.get("COOKIE_REFRESHER_URL", "http://cookie-refresher:8001")
+COOKIE_REFRESHER_TIMEOUT = 300  # seconds — agent loop takes ~18 steps / ~3 min
 
 collection_manager = None
 
@@ -98,32 +96,27 @@ class AsyncCollectionManager:
         # Persistent httpx client to maintain session and connection pooling
         self._client: Optional[httpx.AsyncClient] = None
 
-    async def _login_async(self, client: httpx.AsyncClient) -> bool:
-        login_data = {
-            'correo': SCRAPER_EMAIL,
-            'clave': SCRAPER_PASSWORD,
-            'perfil': RESPONSABLE_PROFILE_ID_LOGIN
-        }
-
-        logger.info(f"Logging in to {LOGIN_URL}...")
-        login_response = await client.post(LOGIN_URL, data=login_data)
-
-        if login_response.status_code in [200, 303]:
-            logger.info("Login successful")
-            self._last_login_time = datetime.now(ZoneInfo("America/Bogota"))
-            self._session_cookies = dict(login_response.cookies)
-            return True
-
-        logger.error(f"Login failed: {login_response.status_code}")
-        logger.debug(f"Response body (first 500 chars): {login_response.text[:500]}")
-        logger.debug(f"Response headers: {dict(login_response.headers)}")
-        return False
-
     def _is_session_valid(self) -> bool:
         if not self._last_login_time or not self._session_cookies:
             return False
         time_since_login = datetime.now(ZoneInfo("America/Bogota")) - self._last_login_time
         return time_since_login < timedelta(hours=SESSION_EXPIRY_HOURS)
+
+    async def _trigger_cookie_refresh(self) -> bool:
+        logger.info("Session expired — calling cookie-refresher service")
+        try:
+            async with httpx.AsyncClient(timeout=COOKIE_REFRESHER_TIMEOUT) as client:
+                response = await client.post(f"{COOKIE_REFRESHER_URL}/refresh")
+                response.raise_for_status()
+                result = response.json()
+            if result.get("success"):
+                logger.info("Cookie refresh succeeded in %d steps", result.get("steps_taken", 0))
+                return True
+            logger.error("Cookie refresh failed: %s", result.get("error"))
+            return False
+        except Exception as exc:
+            logger.error("Cookie refresh request failed: %s", exc)
+            return False
 
     async def _ensure_valid_session(self, client: httpx.AsyncClient) -> bool:
         async with self._session_lock:
@@ -132,10 +125,14 @@ class AsyncCollectionManager:
                 for cookie_name, cookie_value in self._session_cookies.items():
                     client.cookies.set(cookie_name, cookie_value)
                 return True
-            else:
-                # Session expired - cannot auto-login due to Cloudflare bot challenge
-                logger.error("Session expired (Cloudflare cookies TTL=2h). Manual refresh required via /session/set-cookies endpoint")
+
+            if not await self._trigger_cookie_refresh() or not self._is_session_valid():
+                logger.error("Cookie refresh did not produce a valid session")
                 return False
+
+            for cookie_name, cookie_value in self._session_cookies.items():
+                client.cookies.set(cookie_name, cookie_value)
+            return True
 
     def _get_unique_timestamp_param(self) -> dict:
         """Returns a timestamp parameter dict to bypass server-side response caching."""
@@ -181,63 +178,42 @@ class AsyncCollectionManager:
         )
 
     async def _fetch_remote_data_async(self) -> ScrapingResponse:
-        if not SCRAPER_EMAIL or not SCRAPER_PASSWORD:
-            raise RuntimeError("Missing scraper credentials")
-
-        # Create persistent client on first use, reuse for subsequent requests
         if self._client is None:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-            }
-            self._client = httpx.AsyncClient(follow_redirects=True, headers=headers)
+            self._client = httpx.AsyncClient(
+                follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"},
+            )
             logger.info("Created persistent httpx client for session reuse")
 
         client = self._client
 
         try:
             if not await self._ensure_valid_session(client):
-                error_msg = (
-                    "Session expired or invalid. Cloudflare cookies must be manually refreshed.\n"
-                    "1. Login to: https://www.rutasljrj.net/rastreo/ljrj/login\n"
-                    "2. Extract cookies (cf_clearance, ci_session) from browser DevTools\n"
-                    "3. POST to: /session/set-cookies with the cookies\n"
-                    "See GET /session/status for expiry time."
-                )
-                logger.error(error_msg)
-                raise RequestError(error_msg)
+                raise RequestError("Session unavailable and automatic cookie refresh failed")
 
             try:
                 return await self._fetch_data_with_session(client)
             except (RequestError, httpx.HTTPStatusError) as e:
-                logger.warning(f"Data fetch failed: {e}")
+                logger.warning("Data fetch failed: %s", e)
 
-                # Check if it's a redirect (303) which indicates session expired
+                # Session expired mid-flight — invalidate and refresh once
                 if "303" in str(e) or "Forbidden" in str(e):
-                    error_msg = (
-                        "Session expired (got redirect). Cloudflare cookies need manual refresh.\n"
-                        "POST fresh cookies to /session/set-cookies endpoint."
-                    )
-                    logger.error(error_msg)
-                    raise RequestError(error_msg)
+                    logger.info("Session expired mid-request — triggering refresh")
+                    async with self._session_lock:
+                        self._session_cookies = None
+                        self._last_login_time = None
+                    if not await self._ensure_valid_session(client):
+                        raise RequestError("Session expired and cookie refresh failed")
+                    return await self._fetch_data_with_session(client)
 
-                # For other errors, try one more time with fresh session
-                logger.info("Trying fresh session...")
-                async with self._session_lock:
-                    self._session_cookies = None
-                    self._last_login_time = None
-
-                if not await self._ensure_valid_session(client):
-                    raise RequestError("Failed to establish valid session - manual cookie refresh required")
-
-                return await self._fetch_data_with_session(client)
+                raise
 
         except Exception as e:
-            # On any error, close the client so it gets recreated fresh on next attempt
-            logger.warning(f"Error during fetch, will close and recreate client: {e}")
+            logger.warning("Error during fetch, closing client: %s", e)
             if self._client:
                 try:
                     await self._client.aclose()
-                except:
+                except Exception:
                     pass
                 self._client = None
             raise

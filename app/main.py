@@ -157,29 +157,12 @@ async def health():
 @app.post("/session/set-cookies")
 async def set_session_cookies(cookies: dict):
     """
-    Set authenticated session cookies from browser to bypass Cloudflare bot challenge.
+    Receives authenticated session cookies from the cookie-refresher microservice.
 
-    The site uses Cloudflare Bot Management which requires solving a challenge in a browser.
-    Once authenticated, copy your cookies and send them here.
+    Called automatically by the cookie-refresher agent after it logs in and extracts
+    cf_clearance and ci_session. Can also be called manually for testing or recovery.
 
-    Required cookies (from browser DevTools > Application > Cookies > rutasljrj.net):
-    - cf_clearance: Cloudflare bot challenge token (proves human verification)
-    - ci_session: CodeIgniter session ID (set after login)
-
-    Steps:
-    1. Open https://www.rutasljrj.net/rastreo/ljrj/login in your browser
-    2. Login with credentials (may need to solve CAPTCHA)
-    3. Open DevTools (F12) > Application > Cookies > www.rutasljrj.net
-    4. Copy cf_clearance and ci_session values
-    5. Send them to this endpoint
-
-    Example curl:
-    curl -X POST http://localhost:8000/session/set-cookies \\
-      -H "Content-Type: application/json" \\
-      -d '{
-        "cf_clearance": "NjCkl95e1sGaQMK5zpvVhWHQlqinqGuPvjNLB4PoFG4-1775504603...",
-        "ci_session": "tsp9aiaibccvlqs7ku4nib0notg9hn4m"
-      }'
+    Expected payload: {"cf_clearance": "<value>", "ci_session": "<value>"}
     """
     try:
         if not cookies:
