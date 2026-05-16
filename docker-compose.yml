@@ -55,7 +55,11 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: redis://redis:6379/0
-      COOKIE_REFRESHER_URL: ${COOKIE_REFRESHER_URL}
+      VNC_BROWSER_URL: http://vnc-browser:8080
+      VNC_CONTAINER_NAME: vnc_browser
+      PROGRAMMED_STEPS_PATH: /data/programmed_steps.json
+      LOGIN_EMAIL: ${LOGIN_EMAIL}
+      LOGIN_PASSWORD: ${LOGIN_PASSWORD}
       PYTHONPATH: /app
     ports:
       - "8000:8000"
@@ -66,12 +70,26 @@ services:
       - ./app:/app/app
       - ./requirements.txt:/app/requirements.txt  # Sync requirements
       - ./shared-package:/app/shared-package
+      - ./data:/data:ro                           # programmed_steps.json (read-only)
+      - /var/run/docker.sock:/var/run/docker.sock # start/stop vnc-browser on demand
     stdin_open: true
     tty: true
     networks:
       - vtrack-network
     # Development-specific settings
     working_dir: /app
+
+  #4. VNC Browser — on-demand, started by api when cookie refresh is triggered
+  vnc-browser:
+    build:
+      context: microservices/cookie-refresher/vnc-browser
+    container_name: vnc_browser
+    profiles:
+      - tools
+    ports:
+      - "6080:6080"   # noVNC web viewer — http://localhost:6080/vnc.html?autoconnect=1&resize=scale
+    networks:
+      - vtrack-network
 
   pgadmin:
     image: dpage/pgadmin4
