@@ -82,7 +82,7 @@ services:
   #4. VNC Browser — on-demand, started by api when cookie refresh is triggered
   vnc-browser:
     build:
-      context: microservices/cookie-refresher/vnc-browser
+      context: docker/vnc-browser
     container_name: vnc_browser
     profiles:
       - tools
