@@ -106,6 +106,19 @@ pytest app/tests/cookie_refresh/ -v
 
 ---
 
+## Known coverage gaps (future integration tests)
+
+These paths require real infrastructure (Docker, running containers, fake clocks)
+and are deliberately excluded from the unit test suite. Add integration tests when
+the CI environment supports them.
+
+- `cookie_refresh/__init__.py` — `run_refresh()` wiring (needs Docker + VNC container)
+- `main.py` — scheduler loop bodies and `/session/refresh` endpoint (needs asyncio fake clock)
+- `scraper_async.py` — `_collection_loop` and mid-flight session expiry (needs fake httpx over time)
+- `adapters/vnc_browser.py` — stale-network removal path (needs Docker daemon + real container)
+
+---
+
 ## What NOT to do
 
 - Do not hardcode credentials anywhere in source files.
