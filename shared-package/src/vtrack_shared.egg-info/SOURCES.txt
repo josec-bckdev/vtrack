@@ -1,8 +1,10 @@
+MANIFEST.in
 pyproject.toml
 setup.py
 src/shared/__init__.py
 src/shared/location_alerts.py
 src/shared/message_queue.py
+src/shared/zones.yaml
 src/vtrack_shared.egg-info/PKG-INFO
 src/vtrack_shared.egg-info/SOURCES.txt
 src/vtrack_shared.egg-info/dependency_links.txt
