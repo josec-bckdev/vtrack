@@ -81,8 +81,8 @@ class NoAgentStepsUseCase:
 
     async def execute(self) -> AgentResult:
         logger.info("Programmed mode: %d steps, zero AI calls", len(self._script.steps))
-        await self._browser.start()
         try:
+            await self._browser.start()
             return await self._run()
         finally:
             await self._browser.close()
