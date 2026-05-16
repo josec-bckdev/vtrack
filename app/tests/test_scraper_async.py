@@ -194,51 +194,26 @@ class TestSessionManagement:
     """Tests for session management in AsyncCollectionManager."""
 
     @pytest.mark.asyncio
-    async def test_login_success(self, clean_collection_manager, mock_httpx_client):
+    async def test_trigger_cookie_refresh_succeeds(self, clean_collection_manager):
         """
-        WHY: Successful login creates a valid session.
-        ARRANGE: Mock client with successful login response
-        ACT: Call _login_async
-        ASSERT: Session cookies are stored
+        WHY: _trigger_cookie_refresh delegates to run_refresh; success means
+             the cookie refresh use case completed and stored cookies.
         """
-        # Arrange
         manager = clean_collection_manager
-
-        # Act
-        with patch('app.scraper_async.httpx.AsyncClient', return_value=mock_httpx_client):
-            success = await manager._login_async(mock_httpx_client)
-
-        # Assert
-        assert success is True
-        assert manager._session_cookies is not None
-        assert manager._last_login_time is not None
+        with patch('app.cookie_refresh.run_refresh', new=AsyncMock(return_value=True)):
+            result = await manager._trigger_cookie_refresh()
+        assert result is True
 
     @pytest.mark.asyncio
-    async def test_login_failure(self, clean_collection_manager):
+    async def test_trigger_cookie_refresh_fails(self, clean_collection_manager):
         """
-        WHY: Failed login should be handled gracefully.
-        ARRANGE: Mock client returning 401
-        ACT: Call _login_async
-        ASSERT: Returns False, no session stored
+        WHY: If the VNC browser automation fails, _trigger_cookie_refresh
+             must propagate failure so callers can handle it.
         """
-        # Arrange
         manager = clean_collection_manager
-        mock_client = AsyncMock()
-
-        async def mock_post_failure(*args, **kwargs):
-            response = AsyncMock()
-            response.status_code = 401
-            response.cookies = {}
-            return response
-
-        mock_client.post = mock_post_failure
-
-        # Act
-        success = await manager._login_async(mock_client)
-
-        # Assert
-        assert success is False
-        assert manager._session_cookies is None
+        with patch('app.cookie_refresh.run_refresh', new=AsyncMock(return_value=False)):
+            result = await manager._trigger_cookie_refresh()
+        assert result is False
 
     def test_session_validity_check_fresh_session(self, clean_collection_manager):
         """
@@ -301,51 +276,41 @@ class TestDataFetching:
     """Tests for fetching data from external API."""
 
     @pytest.mark.asyncio
-    async def test_fetch_remote_data_success(
+    async def test_fetch_with_valid_session_returns_response(
         self,
         clean_collection_manager,
         mock_httpx_client,
-        mock_scraper_credentials
     ):
         """
-        WHY: Successful fetch returns ScrapingResponse.
-        ARRANGE: Mock client with successful responses
-        ACT: Fetch remote data
-        ASSERT: Returns ScrapingResponse with correct data
+        WHY: With a valid session already in place, _fetch_remote_data_async
+             must return a ScrapingResponse without triggering cookie refresh.
         """
-        # Arrange
         manager = clean_collection_manager
+        # Pre-load a valid session so _ensure_valid_session skips cookie refresh
+        manager._session_cookies = {"cf_clearance": "cf_test", "ci_session": "ci_test"}
+        manager._last_login_time = datetime.now(ZoneInfo("America/Bogota"))
+        # Inject the mock httpx client so no real network call is made
+        mock_httpx_client.aclose = AsyncMock()
+        manager._client = mock_httpx_client
 
-        # Act - patch module-level credentials since they're read at import time
-        with patch('app.scraper_async.SCRAPER_EMAIL', 'test@example.com'):
-            with patch('app.scraper_async.SCRAPER_PASSWORD', 'test_password'):
-                with patch('app.scraper_async.httpx.AsyncClient') as mock_client_class:
-                    mock_httpx_client.aclose = AsyncMock()
-                    mock_client_class.return_value = mock_httpx_client
-                    result = await manager._fetch_remote_data_async()
+        result = await manager._fetch_remote_data_async()
 
-        # Assert
         assert isinstance(result, ScrapingResponse)
         assert result.source == "rutasljrj.net"
         assert len(result.valores_data) > 0
         assert len(result.estados_data) > 0
 
     @pytest.mark.asyncio
-    async def test_fetch_without_credentials_raises_error(self, clean_collection_manager, monkeypatch):
+    async def test_fetch_raises_when_cookie_refresh_fails(self, clean_collection_manager):
         """
-        WHY: Missing credentials should fail immediately.
-        ARRANGE: Manager without credentials set
-        ACT: Attempt to fetch data
-        ASSERT: Raises RuntimeError
+        WHY: If _trigger_cookie_refresh returns False, _fetch_remote_data_async
+             must raise RequestError so the collection loop can handle it.
         """
-        # Arrange
         manager = clean_collection_manager
-        monkeypatch.setenv("SCRAPER_EMAIL", "")
-        monkeypatch.setenv("SCRAPER_PASSWORD", "")
-
-        # Act & Assert
-        with pytest.raises(RuntimeError, match="Missing scraper credentials"):
-            await manager._fetch_remote_data_async()
+        # No valid session; mock refresh to fail
+        with patch.object(manager, '_trigger_cookie_refresh', new=AsyncMock(return_value=False)):
+            with pytest.raises(RequestError):
+                await manager._fetch_remote_data_async()
 
 
 # =============================================================================
