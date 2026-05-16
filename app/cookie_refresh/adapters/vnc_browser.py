@@ -91,16 +91,22 @@ class VncBrowserGateway(IBrowserGateway):
 
     async def _wait_for_health(self) -> None:
         deadline = asyncio.get_event_loop().time() + _HEALTH_TIMEOUT
+        last_error: str = ""
         async with httpx.AsyncClient(base_url=self._base_url) as probe:
             while asyncio.get_event_loop().time() < deadline:
                 try:
                     resp = await probe.get("/health", timeout=3.0)
                     if resp.status_code == 200 and resp.json().get("browser") == "running":
                         return
-                except Exception:
-                    pass
+                    last_error = f"status={resp.status_code} body={resp.text[:120]}"
+                except Exception as exc:
+                    last_error = str(exc)
+                logger.debug("VNC health check pending: %s", last_error)
                 await asyncio.sleep(_HEALTH_POLL_INTERVAL)
-        raise RuntimeError(f"VNC browser container did not become healthy within {_HEALTH_TIMEOUT}s")
+        raise RuntimeError(
+            f"VNC browser container did not become healthy within {_HEALTH_TIMEOUT}s "
+            f"(last error: {last_error})"
+        )
 
     def _http(self) -> httpx.AsyncClient:
         if self._client is None:
