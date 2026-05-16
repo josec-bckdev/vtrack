@@ -558,3 +558,100 @@ class TestAsyncEndpoints:
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert "status" in data
+
+
+# =============================================================================
+# SESSION MANAGEMENT ENDPOINT TESTS (main.py)
+# =============================================================================
+
+class TestSetSessionCookiesEndpoint:
+    """Tests for POST /session/set-cookies."""
+
+    def test_set_cookies_success(self, test_client):
+        payload = {"cf_clearance": "cf_abc", "ci_session": "ci_xyz"}
+        response = test_client.post("/session/set-cookies", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["message"] == "Cookies set successfully"
+        assert set(data["cookies_set"]) == {"cf_clearance", "ci_session"}
+        assert data["cookies_count"] == 2
+
+    def test_set_cookies_empty_payload_returns_400(self, test_client):
+        response = test_client.post("/session/set-cookies", json={})
+        assert response.status_code == 400
+
+    def test_set_cookies_stores_on_collection_manager(self, test_client):
+        from app.scraper_async import collection_manager
+        payload = {"cf_clearance": "cf_test", "ci_session": "ci_test"}
+        test_client.post("/session/set-cookies", json=payload)
+        assert collection_manager._session_cookies == payload
+        assert collection_manager._last_login_time is not None
+
+
+class TestGetSessionStatusEndpoint:
+    """Tests for GET /session/status."""
+
+    def test_status_no_session(self, test_client):
+        from app.scraper_async import collection_manager
+        collection_manager._last_login_time = None
+        collection_manager._session_cookies = None
+
+        response = test_client.get("/session/status")
+        assert response.status_code == 200
+        assert response.json()["status"] == "no_session"
+
+    def test_status_valid_session(self, test_client):
+        from app.scraper_async import collection_manager
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        collection_manager._last_login_time = datetime.now(ZoneInfo("America/Bogota"))
+        collection_manager._session_cookies = {"cf_clearance": "cf", "ci_session": "ci"}
+
+        response = test_client.get("/session/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "valid"
+        assert data["expires_in_seconds"] > 0
+
+    def test_status_expired_session_includes_refresh_instructions(self, test_client):
+        from app.scraper_async import collection_manager
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        collection_manager._last_login_time = (
+            datetime.now(ZoneInfo("America/Bogota")) - timedelta(hours=3)
+        )
+        collection_manager._session_cookies = {"cf_clearance": "cf", "ci_session": "ci"}
+
+        response = test_client.get("/session/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "expired"
+        assert "refresh_instructions" in data
+
+
+class TestTriggerCookieRefreshEndpoint:
+    """Tests for POST /session/refresh."""
+
+    def test_refresh_success_returns_200(self, test_client):
+        with patch("app.main.run_refresh", new=AsyncMock(return_value=True)):
+            response = test_client.post("/session/refresh")
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+
+    def test_refresh_failure_returns_500(self, test_client):
+        with patch("app.main.run_refresh", new=AsyncMock(return_value=False)):
+            response = test_client.post("/session/refresh")
+        assert response.status_code == 500
+
+    def test_refresh_unexpected_exception_returns_500(self, test_client):
+        with patch("app.main.run_refresh", new=AsyncMock(side_effect=RuntimeError("boom"))):
+            response = test_client.post("/session/refresh")
+        assert response.status_code == 500
+        assert "boom" in response.json()["detail"]
+
+
+class TestHealthEndpoint:
+    def test_health_returns_ok(self, test_client):
+        response = test_client.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
