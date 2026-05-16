@@ -55,6 +55,7 @@ class ActionDispatcher:
             await asyncio.sleep(action.get("duration", 1000) / 1000)
         else:
             logger.warning("Unsupported action type: %s", action_type)
+            return f"unsupported action: {action_type}"
         return f"{action_type} executed"
 
 
