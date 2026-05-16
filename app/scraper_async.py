@@ -103,20 +103,9 @@ class AsyncCollectionManager:
         return time_since_login < timedelta(hours=SESSION_EXPIRY_HOURS)
 
     async def _trigger_cookie_refresh(self) -> bool:
-        logger.info("Session expired — calling cookie-refresher service")
-        try:
-            async with httpx.AsyncClient(timeout=COOKIE_REFRESHER_TIMEOUT) as client:
-                response = await client.post(f"{COOKIE_REFRESHER_URL}/refresh")
-                response.raise_for_status()
-                result = response.json()
-            if result.get("success"):
-                logger.info("Cookie refresh succeeded in %d steps", result.get("steps_taken", 0))
-                return True
-            logger.error("Cookie refresh failed: %s", result.get("error"))
-            return False
-        except Exception as exc:
-            logger.error("Cookie refresh request failed: %s", exc)
-            return False
+        logger.info("Session expired — running programmed cookie refresh")
+        from app.cookie_refresh import run_refresh
+        return await run_refresh(self)
 
     async def _ensure_valid_session(self, client: httpx.AsyncClient) -> bool:
         async with self._session_lock:

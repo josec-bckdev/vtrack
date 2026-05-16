@@ -11,54 +11,57 @@ from app.models import CollectionStatusResponse, CollectionStatusEnum
 from shared.message_queue import MessageQueue
 import os
 
+from app.cookie_refresh import run_refresh
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class Scheduler:
-    """Manages scheduled collection tasks."""
-    
+    """Manages scheduled collection and cookie-refresh tasks."""
+
     def __init__(self):
         self.morning_task: asyncio.Task | None = None
         self.afternoon_task: asyncio.Task | None = None
+        self.cookie_morning_task: asyncio.Task | None = None
+        self.cookie_afternoon_task: asyncio.Task | None = None
         self.is_running = False
         self.collection_manager = None
 
     def set_collection_manager(self, manager):
-        """Set the collection manager instance."""
         self.collection_manager = manager
 
     async def start_scheduler(self):
-        """Start the scheduler to run collection at 5:45 AM and 3:15 PM daily."""
+        """Start schedulers: cookie refresh at 5:40 AM / 3:10 PM, collection at 5:45 AM / 3:15 PM."""
         if self.is_running:
             logger.info("Scheduler is already running")
             return
-            
+
         if not self.collection_manager:
             logger.error("Collection manager not set for scheduler")
             return
-            
+
         self.is_running = True
         logger.info("Starting collection scheduler...")
-        
-        # Start both scheduled tasks
+
         self.morning_task = asyncio.create_task(self._schedule_morning_collection())
         self.afternoon_task = asyncio.create_task(self._schedule_afternoon_collection())
-        
-        logger.info("Collection scheduler started - will run at 5:45 AM and 3:15 PM daily")
+        self.cookie_morning_task = asyncio.create_task(self._schedule_cookie_refresh(time(5, 40, 0), "morning"))
+        self.cookie_afternoon_task = asyncio.create_task(self._schedule_cookie_refresh(time(15, 10, 0), "afternoon"))
+
+        logger.info("Schedulers started — cookie refresh at 5:40 AM / 3:10 PM, collection at 5:45 AM / 3:15 PM")
 
     async def stop_scheduler(self):
         """Stop all scheduled tasks."""
         self.is_running = False
-        
-        if self.morning_task:
-            self.morning_task.cancel()
-            self.morning_task = None
-            
-        if self.afternoon_task:
-            self.afternoon_task.cancel()
-            self.afternoon_task = None
-            
+
+        for task in (self.morning_task, self.afternoon_task,
+                     self.cookie_morning_task, self.cookie_afternoon_task):
+            if task:
+                task.cancel()
+        self.morning_task = self.afternoon_task = None
+        self.cookie_morning_task = self.cookie_afternoon_task = None
+
         logger.info("Collection scheduler stopped")
 
     async def _schedule_morning_collection(self):
@@ -98,6 +101,23 @@ class Scheduler:
             
             if self.is_running:
                 await self._start_collection_if_not_running("afternoon")
+
+    async def _schedule_cookie_refresh(self, target_time: time, label: str):
+        """Run a proactive cookie refresh at the given daily time."""
+        while self.is_running:
+            now = datetime.now(ZoneInfo("America/Bogota"))
+            next_run = datetime.combine(now.date(), target_time).replace(tzinfo=ZoneInfo("America/Bogota"))
+            if now >= next_run:
+                next_run = next_run.replace(day=next_run.day + 1)
+            wait_seconds = (next_run - now).total_seconds()
+            logger.info("Cookie refresh (%s) scheduled for %s (%.0fs from now)", label, next_run, wait_seconds)
+            await asyncio.sleep(wait_seconds)
+            if self.is_running and self.collection_manager is not None:
+                try:
+                    logger.info("Running proactive cookie refresh (%s)", label)
+                    await run_refresh(self.collection_manager)
+                except Exception as exc:
+                    logger.error("Proactive cookie refresh (%s) failed: %s", label, exc)
 
     async def _start_collection_if_not_running(self, schedule_type: str):
         """Start collection if it's not already running."""
@@ -340,3 +360,23 @@ async def get_scheduler_status():
         "next_afternoon_run": "3:15 PM daily",
         "timezone": "America/Bogota"
     }
+
+@app.post("/session/refresh")
+async def trigger_cookie_refresh():
+    """
+    Manually trigger the programmed cookie refresh flow.
+
+    Starts the VNC browser container, runs the pre-recorded login steps,
+    and stores the resulting cookies in-process. Useful for recovery when
+    the session has expired outside the scheduled refresh windows.
+    """
+    try:
+        success = await run_refresh(collection_manager)
+        if success:
+            return {"success": True, "message": "Cookie refresh completed successfully"}
+        raise HTTPException(status_code=500, detail="Cookie refresh failed — check logs for details")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Unexpected error during manual cookie refresh: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
