@@ -181,3 +181,96 @@ class TestVncBrowserGatewayActions:
         gw = _make_gateway()
         with pytest.raises(RuntimeError, match="start\\(\\)"):
             await gw.navigate("https://example.com")
+
+
+# ---------------------------------------------------------------------------
+# close() — additional paths
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestVncBrowserGatewayClose:
+    async def test_close_when_client_is_none_still_stops_container(self):
+        gw = _make_gateway()
+        assert gw._client is None
+        container = _running_container()
+        gw._docker.containers.get.return_value = container
+
+        await gw.close()
+
+        container.stop.assert_called_once()
+
+    async def test_close_handles_generic_stop_exception(self):
+        gw = _make_gateway()
+        gw._client = AsyncMock()
+        container = _running_container()
+        container.stop.side_effect = RuntimeError("unexpected")
+        gw._docker.containers.get.return_value = container
+
+        await gw.close()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# start() — stale network path (container.start() raises NotFound)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestVncBrowserGatewayStaleNetwork:
+    async def test_start_removes_stale_container_and_raises(self):
+        import docker.errors
+        gw = _make_gateway()
+        container = _stopped_container()
+        container.start.side_effect = docker.errors.NotFound("network gone")
+        gw._docker.containers.get.return_value = container
+
+        with pytest.raises(RuntimeError, match="stale network"):
+            await gw.start()
+
+        container.remove.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _wait_for_health()
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestWaitForHealth:
+    async def test_returns_when_container_is_healthy(self):
+        gw = _make_gateway()
+
+        healthy_resp = MagicMock()
+        healthy_resp.status_code = 200
+        healthy_resp.json.return_value = {"browser": "running"}
+
+        mock_probe = AsyncMock()
+        mock_probe.get = AsyncMock(return_value=healthy_resp)
+        mock_probe.__aenter__ = AsyncMock(return_value=mock_probe)
+        mock_probe.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.cookie_refresh.adapters.vnc_browser.httpx.AsyncClient",
+                   return_value=mock_probe):
+            await gw._wait_for_health()  # must not raise
+
+    async def test_raises_when_health_check_times_out(self):
+        gw = _make_gateway()
+
+        mock_probe = AsyncMock()
+        mock_probe.get = AsyncMock(side_effect=Exception("refused"))
+        mock_probe.__aenter__ = AsyncMock(return_value=mock_probe)
+        mock_probe.__aexit__ = AsyncMock(return_value=False)
+
+        call_count = 0
+
+        def _time():
+            nonlocal call_count
+            call_count += 1
+            # First call: set deadline. Subsequent calls: already past deadline.
+            return 0.0 if call_count == 1 else 999.0
+
+        mock_loop = MagicMock()
+        mock_loop.time.side_effect = _time
+
+        with patch("app.cookie_refresh.adapters.vnc_browser.httpx.AsyncClient",
+                   return_value=mock_probe), \
+             patch("asyncio.get_event_loop", return_value=mock_loop):
+            with pytest.raises(RuntimeError, match="healthy"):
+                await gw._wait_for_health()
