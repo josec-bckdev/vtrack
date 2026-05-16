@@ -581,3 +581,331 @@ class TestAsyncCollectionManagerLifecycle:
         route_entry = db_session.query(RouteDataEntry).first()
         assert route_entry is not None
         assert route_entry.ruta == sample_route_data['ruta']
+
+
+# =============================================================================
+# NORMALIZE ROUTE DATA — EMPTY INNER LIST
+# =============================================================================
+
+class TestNormalizeRouteDataEmptyInnerList:
+    def test_empty_inner_list_returns_none(self):
+        """WHY: API can return [[]] — outer list non-empty but inner empty, must not IndexError."""
+        result = normalize_route_data([[]], [[]])
+        assert result is None
+
+
+# =============================================================================
+# FETCH DATA — JSON PARSE FAILURE PATHS
+# =============================================================================
+
+class TestFetchDataJsonParseFailures:
+    @pytest.mark.asyncio
+    async def test_raises_when_valores_json_parse_fails(self, clean_collection_manager):
+        """WHY: Unparseable valores response must propagate so the collection loop can handle it."""
+        manager = clean_collection_manager
+
+        bad_resp = MagicMock()
+        bad_resp.raise_for_status = MagicMock()
+        bad_resp.json.side_effect = ValueError("not json")
+        bad_resp.text = "garbage"
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=bad_resp)
+        mock_client.cookies = MagicMock()
+
+        with pytest.raises(ValueError):
+            await manager._fetch_data_with_session(mock_client)
+
+    @pytest.mark.asyncio
+    async def test_raises_when_estados_json_parse_fails(self, clean_collection_manager):
+        """WHY: Unparseable estados response must propagate; valores success doesn't mask it."""
+        manager = clean_collection_manager
+        call_count = 0
+
+        async def post_side_effect(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.text = "garbage"
+            if call_count == 1:
+                resp.json = MagicMock(return_value=[["101", "r", "4.6", "-74.0", "i", "2025-01-01 00:00:00"]])
+            else:
+                resp.json = MagicMock(side_effect=ValueError("not json"))
+            return resp
+
+        mock_client = AsyncMock()
+        mock_client.post = post_side_effect
+        mock_client.cookies = MagicMock()
+
+        with pytest.raises(ValueError):
+            await manager._fetch_data_with_session(mock_client)
+
+
+# =============================================================================
+# STOP — HTTPX CLIENT CLEANUP
+# =============================================================================
+
+class TestStopHttpxClientCleanup:
+    @pytest.mark.asyncio
+    async def test_stop_closes_persistent_client(self, clean_collection_manager):
+        """WHY: stop() must close the httpx client to release connections."""
+        manager = clean_collection_manager
+        mock_client = AsyncMock()
+        manager._client = mock_client
+        manager._is_running = True
+
+        await manager.stop()
+
+        mock_client.aclose.assert_called_once()
+        assert manager._client is None
+
+    @pytest.mark.asyncio
+    async def test_stop_handles_aclose_exception(self, clean_collection_manager):
+        """WHY: If aclose() raises, stop() must still complete and clear _client."""
+        manager = clean_collection_manager
+        mock_client = AsyncMock()
+        mock_client.aclose.side_effect = Exception("already gone")
+        manager._client = mock_client
+        manager._is_running = True
+
+        await manager.stop()  # must not raise
+
+        assert manager._client is None
+
+
+# =============================================================================
+# GET STATUS — WITH ACTIVE TASK ID
+# =============================================================================
+
+class TestGetStatusWithActiveTask:
+    @pytest.mark.asyncio
+    async def test_get_status_includes_session_info_when_task_active(
+        self, clean_collection_manager, db_session, mock_scraper_credentials
+    ):
+        """WHY: get_status() branches on current_task_id; active path must include session validity."""
+        manager = clean_collection_manager
+
+        async def mock_loop():
+            await asyncio.sleep(0.05)
+            manager._is_running = False
+
+        with patch.object(manager, '_collection_loop', side_effect=mock_loop):
+            await manager.start()
+            await asyncio.sleep(0.1)
+
+        status = await manager.get_status()
+
+        assert status.task_id == manager.current_task_id
+        assert "session" in status.message.lower()
+
+
+# =============================================================================
+# WAIT FOR COMPLETION
+# =============================================================================
+
+class TestWaitForCompletion:
+    @pytest.mark.asyncio
+    async def test_returns_immediately_when_no_task(self, clean_collection_manager):
+        """WHY: wait_for_completion() with no task must not hang."""
+        manager = clean_collection_manager
+        assert manager._task is None
+        await manager.wait_for_completion()
+
+    @pytest.mark.asyncio
+    async def test_waits_for_running_task(self, clean_collection_manager, mock_scraper_credentials):
+        """WHY: wait_for_completion() must await the task without raising CancelledError."""
+        manager = clean_collection_manager
+
+        async def short_loop():
+            await asyncio.sleep(0.02)
+            manager._is_running = False
+
+        with patch.object(manager, '_collection_loop', side_effect=short_loop):
+            await manager.start()
+
+        await manager.wait_for_completion()  # must not raise
+
+
+# =============================================================================
+# SAVE ROUTE DATA — MESSAGE QUEUE
+# =============================================================================
+
+class TestSaveRouteDataMessageQueue:
+    @pytest.mark.asyncio
+    async def test_pushes_coordinate_when_queue_is_set(
+        self, clean_collection_manager, db_session, sample_route_data, mock_scraper_credentials
+    ):
+        """WHY: message_queue.push_coordinate must be called for downstream alert workers."""
+        manager = clean_collection_manager
+        mock_queue = MagicMock()
+        manager.message_queue = mock_queue
+
+        async def mock_loop():
+            await asyncio.sleep(0.05)
+            manager._is_running = False
+
+        with patch.object(manager, '_collection_loop', side_effect=mock_loop):
+            await manager.start()
+            await asyncio.sleep(0.1)
+
+        await manager._save_route_data_async(sample_route_data)
+
+        mock_queue.push_coordinate.assert_called_once_with(
+            ruta=sample_route_data['ruta'],
+            latitude=sample_route_data['ns_latitude'],
+            longitude=sample_route_data['ew_longitude'],
+            position_ts=sample_route_data.get('position_ts'),
+            route_status=sample_route_data.get('route_status'),
+            student_status=sample_route_data.get('student_status'),
+        )
+
+    @pytest.mark.asyncio
+    async def test_queue_push_failure_does_not_prevent_db_save(
+        self, clean_collection_manager, db_session, sample_route_data, mock_scraper_credentials
+    ):
+        """WHY: Redis failure must not lose the DB record — data integrity over alerts."""
+        manager = clean_collection_manager
+        mock_queue = MagicMock()
+        mock_queue.push_coordinate.side_effect = Exception("redis down")
+        manager.message_queue = mock_queue
+
+        async def mock_loop():
+            await asyncio.sleep(0.05)
+            manager._is_running = False
+
+        with patch.object(manager, '_collection_loop', side_effect=mock_loop):
+            await manager.start()
+            await asyncio.sleep(0.1)
+
+        await manager._save_route_data_async(sample_route_data)  # must not raise
+
+        assert manager.datapoints_collected == 1
+
+
+# =============================================================================
+# SHOULD STOP COLLECTION
+# =============================================================================
+
+class TestShouldStopCollection:
+    def test_stops_when_pm_delivered(self, clean_collection_manager):
+        """WHY: "Bajo" in the afternoon signals route complete."""
+        manager = clean_collection_manager
+        fixed = datetime(2025, 1, 15, 16, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
+        with patch("app.scraper_async.datetime") as mock_dt:
+            mock_dt.now.return_value = fixed
+            result = manager._should_stop_collection({'student_status': 'Bajo'})
+        assert result is True
+
+    def test_stops_when_am_onboard(self, clean_collection_manager):
+        """WHY: "Subio" in the morning means student is onboard — stop tracking."""
+        manager = clean_collection_manager
+        fixed = datetime(2025, 1, 15, 7, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
+        with patch("app.scraper_async.datetime") as mock_dt:
+            mock_dt.now.return_value = fixed
+            result = manager._should_stop_collection({'student_status': 'Subio'})
+        assert result is True
+
+    def test_does_not_stop_in_wrong_time_band(self, clean_collection_manager):
+        """WHY: "Bajo" in the morning should not stop the morning run."""
+        manager = clean_collection_manager
+        fixed = datetime(2025, 1, 15, 7, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
+        with patch("app.scraper_async.datetime") as mock_dt:
+            mock_dt.now.return_value = fixed
+            result = manager._should_stop_collection({'student_status': 'Bajo'})
+        assert result is False
+
+    def test_does_not_stop_with_neutral_status(self, clean_collection_manager):
+        """WHY: Unknown student status must not trigger a stop."""
+        manager = clean_collection_manager
+        result = manager._should_stop_collection({'student_status': 'En espera'})
+        assert result is False
+
+
+# =============================================================================
+# STOP — IDEMPOTENCY
+# =============================================================================
+
+class TestStopIdempotency:
+    @pytest.mark.asyncio
+    async def test_stop_when_already_stopped_returns_true(self, clean_collection_manager):
+        """WHY: stop() on an already-stopped manager must not raise."""
+        manager = clean_collection_manager
+        assert manager._is_running is False
+        result = await manager.stop()
+        assert result is True
+
+
+# =============================================================================
+# ENSURE VALID SESSION — POST-REFRESH COOKIE APPLICATION
+# =============================================================================
+
+class TestEnsureValidSessionPostRefresh:
+    @pytest.mark.asyncio
+    async def test_cookies_applied_to_client_after_successful_refresh(self, clean_collection_manager):
+        """WHY: After refresh the new cookies must be set on the client (lines 122-124)."""
+        manager = clean_collection_manager
+
+        def _set_cookies():
+            manager._session_cookies = {"cf_clearance": "new_cf", "ci_session": "new_ci"}
+            manager._last_login_time = datetime.now(ZoneInfo("America/Bogota"))
+            return True
+
+        mock_client = AsyncMock()
+        mock_client.cookies = MagicMock()
+
+        with patch.object(manager, '_trigger_cookie_refresh',
+                          new=AsyncMock(side_effect=lambda: _set_cookies())):
+            result = await manager._ensure_valid_session(mock_client)
+
+        assert result is True
+        assert mock_client.cookies.set.call_count == 2
+
+
+# =============================================================================
+# WAIT FOR COMPLETION — CANCELLED ERROR PATH
+# =============================================================================
+
+class TestWaitForCompletionCancelledError:
+    @pytest.mark.asyncio
+    async def test_swallows_cancelled_error(self, clean_collection_manager):
+        """WHY: wait_for_completion must absorb CancelledError so callers don't crash."""
+        manager = clean_collection_manager
+
+        async def _never_ends():
+            await asyncio.sleep(3600)
+
+        task = asyncio.create_task(_never_ends())
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        manager._task = task
+
+        await manager.wait_for_completion()  # must not raise
+
+
+# =============================================================================
+# SAVE ROUTE DATA — EXCEPTION / ROLLBACK PATH
+# =============================================================================
+
+class TestSaveRouteDataExceptionPath:
+    @pytest.mark.asyncio
+    async def test_db_error_triggers_rollback_and_raises(
+        self, clean_collection_manager, db_session, sample_route_data, mock_scraper_credentials
+    ):
+        """WHY: A DB insert failure must rollback the transaction and re-raise."""
+        manager = clean_collection_manager
+
+        async def mock_loop():
+            await asyncio.sleep(0.05)
+            manager._is_running = False
+
+        with patch.object(manager, '_collection_loop', side_effect=mock_loop):
+            await manager.start()
+            await asyncio.sleep(0.1)
+
+        with patch("app.scraper_async.RouteDataEntry", side_effect=Exception("db error")):
+            with pytest.raises(Exception, match="db error"):
+                await manager._save_route_data_async(sample_route_data)
