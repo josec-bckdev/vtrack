@@ -4,5 +4,13 @@ schedule:
     morning: "05:40"
     afternoon: "15:10"
   collection:
-    morning: "05:45"
-    afternoon: "15:15"
+    morning:
+      window_open:   "05:00"
+      fire_time:     "05:45"
+      grace_minutes: 5
+      window_close:  "06:40"
+    afternoon:
+      window_open:   "14:30"
+      fire_time:     "15:15"
+      grace_minutes: 5
+      window_close:  "16:30"

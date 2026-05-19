@@ -40,19 +40,21 @@ class Scheduler:
             schedule_config = load_schedule_config(_default_path)
 
         self.is_running = True
+        morning_fire = schedule_config.collection_morning.fire_time
+        afternoon_fire = schedule_config.collection_afternoon.fire_time
         self.scheduled_times_label = (
             f"cookie refresh {schedule_config.cookie_refresh_morning.strftime('%H:%M')} / "
             f"{schedule_config.cookie_refresh_afternoon.strftime('%H:%M')}, "
-            f"collection {schedule_config.collection_morning.strftime('%H:%M')} / "
-            f"{schedule_config.collection_afternoon.strftime('%H:%M')}"
+            f"collection {morning_fire.strftime('%H:%M')} / "
+            f"{afternoon_fire.strftime('%H:%M')}"
         )
         logger.info("Starting collection scheduler...")
 
         self.morning_task = asyncio.create_task(
-            self._schedule_morning_collection(schedule_config.collection_morning)
+            self._schedule_morning_collection(morning_fire)
         )
         self.afternoon_task = asyncio.create_task(
-            self._schedule_afternoon_collection(schedule_config.collection_afternoon)
+            self._schedule_afternoon_collection(afternoon_fire)
         )
         self.cookie_morning_task = asyncio.create_task(
             self._schedule_cookie_refresh(schedule_config.cookie_refresh_morning, "morning")
@@ -65,8 +67,8 @@ class Scheduler:
             "Schedulers started — cookie refresh at %s / %s, collection at %s / %s",
             schedule_config.cookie_refresh_morning.strftime("%H:%M"),
             schedule_config.cookie_refresh_afternoon.strftime("%H:%M"),
-            schedule_config.collection_morning.strftime("%H:%M"),
-            schedule_config.collection_afternoon.strftime("%H:%M"),
+            morning_fire.strftime("%H:%M"),
+            afternoon_fire.strftime("%H:%M"),
         )
 
     async def stop_scheduler(self):
