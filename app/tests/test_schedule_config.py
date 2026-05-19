@@ -143,6 +143,7 @@ class TestSchedulerUsesConfigTimes:
 
     @pytest.mark.asyncio
     async def test_start_scheduler_passes_collection_morning_from_config(self):
+        from unittest.mock import AsyncMock
         from app.main import Scheduler
         from app.config import ScheduleConfig
 
@@ -156,37 +157,27 @@ class TestSchedulerUsesConfigTimes:
         scheduler = Scheduler()
         scheduler.set_collection_manager(MagicMock())
 
-        morning_args = []
-        afternoon_args = []
+        mock_morning = AsyncMock()
+        mock_afternoon = AsyncMock()
+        mock_cookie = AsyncMock()
 
-        async def capture_morning(target_time):
-            morning_args.append(target_time)
-
-        async def capture_afternoon(target_time):
-            afternoon_args.append(target_time)
-
-        async def noop_cookie(*args, **kwargs):
-            pass
-
-        with patch.object(scheduler, "_schedule_morning_collection", side_effect=capture_morning), \
-             patch.object(scheduler, "_schedule_afternoon_collection", side_effect=capture_afternoon), \
-             patch.object(scheduler, "_schedule_cookie_refresh", side_effect=noop_cookie):
+        # asyncio.create_task(fn(args)) calls fn(args) synchronously to get the
+        # coroutine — so call_args is recorded before the task body runs.
+        with patch.object(scheduler, "_schedule_morning_collection", mock_morning), \
+             patch.object(scheduler, "_schedule_afternoon_collection", mock_afternoon), \
+             patch.object(scheduler, "_schedule_cookie_refresh", mock_cookie):
             await scheduler.start_scheduler(schedule_config=cfg)
-            # cancel tasks so the event loop doesn't complain
-            if scheduler.morning_task:
-                scheduler.morning_task.cancel()
-            if scheduler.afternoon_task:
-                scheduler.afternoon_task.cancel()
-            if scheduler.cookie_morning_task:
-                scheduler.cookie_morning_task.cancel()
-            if scheduler.cookie_afternoon_task:
-                scheduler.cookie_afternoon_task.cancel()
+            for t in (scheduler.morning_task, scheduler.afternoon_task,
+                      scheduler.cookie_morning_task, scheduler.cookie_afternoon_task):
+                if t:
+                    t.cancel()
 
-        assert morning_args == [time(7, 0)]
-        assert afternoon_args == [time(16, 0)]
+        mock_morning.assert_called_once_with(time(7, 0))
+        mock_afternoon.assert_called_once_with(time(16, 0))
 
     @pytest.mark.asyncio
     async def test_start_scheduler_passes_cookie_times_from_config(self):
+        from unittest.mock import AsyncMock
         from app.main import Scheduler
         from app.config import ScheduleConfig
 
@@ -200,22 +191,18 @@ class TestSchedulerUsesConfigTimes:
         scheduler = Scheduler()
         scheduler.set_collection_manager(MagicMock())
 
-        cookie_args = []
+        mock_morning = AsyncMock()
+        mock_afternoon = AsyncMock()
+        mock_cookie = AsyncMock()
 
-        async def capture_cookie(target_time, label):
-            cookie_args.append((target_time, label))
-
-        async def noop(*args, **kwargs):
-            pass
-
-        with patch.object(scheduler, "_schedule_morning_collection", side_effect=noop), \
-             patch.object(scheduler, "_schedule_afternoon_collection", side_effect=noop), \
-             patch.object(scheduler, "_schedule_cookie_refresh", side_effect=capture_cookie):
+        with patch.object(scheduler, "_schedule_morning_collection", mock_morning), \
+             patch.object(scheduler, "_schedule_afternoon_collection", mock_afternoon), \
+             patch.object(scheduler, "_schedule_cookie_refresh", mock_cookie):
             await scheduler.start_scheduler(schedule_config=cfg)
             for t in (scheduler.morning_task, scheduler.afternoon_task,
                       scheduler.cookie_morning_task, scheduler.cookie_afternoon_task):
                 if t:
                     t.cancel()
 
-        assert (time(6, 0), "morning") in cookie_args
-        assert (time(14, 0), "afternoon") in cookie_args
+        mock_cookie.assert_any_call(time(6, 0), "morning")
+        mock_cookie.assert_any_call(time(14, 0), "afternoon")

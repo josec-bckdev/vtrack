@@ -2,16 +2,20 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException
 from app.database import init_db
 from .data_server import router as data_server_router
 from app.scraper_async import collection_manager
 from app.models import CollectionStatusResponse, CollectionStatusEnum
+from app.config import ScheduleConfig, load_schedule_config
 from shared.message_queue import MessageQueue
 import os
 
 from app.cookie_refresh import run_refresh
+
+_DEFAULT_SCHEDULE_PATH = Path(__file__).parent / "schedule.yaml"
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -27,12 +31,13 @@ class Scheduler:
         self.cookie_afternoon_task: asyncio.Task | None = None
         self.is_running = False
         self.collection_manager = None
+        self.scheduled_times_label: str = "not started"
 
     def set_collection_manager(self, manager):
         self.collection_manager = manager
 
-    async def start_scheduler(self):
-        """Start schedulers: cookie refresh at 5:40 AM / 3:10 PM, collection at 5:45 AM / 3:15 PM."""
+    async def start_scheduler(self, schedule_config: ScheduleConfig | None = None):
+        """Start all scheduled tasks using times from schedule_config (or schedule.yaml)."""
         if self.is_running:
             logger.info("Scheduler is already running")
             return
@@ -41,15 +46,38 @@ class Scheduler:
             logger.error("Collection manager not set for scheduler")
             return
 
+        if schedule_config is None:
+            schedule_config = load_schedule_config(_DEFAULT_SCHEDULE_PATH)
+
         self.is_running = True
+        self.scheduled_times_label = (
+            f"cookie refresh {schedule_config.cookie_refresh_morning.strftime('%H:%M')} / "
+            f"{schedule_config.cookie_refresh_afternoon.strftime('%H:%M')}, "
+            f"collection {schedule_config.collection_morning.strftime('%H:%M')} / "
+            f"{schedule_config.collection_afternoon.strftime('%H:%M')}"
+        )
         logger.info("Starting collection scheduler...")
 
-        self.morning_task = asyncio.create_task(self._schedule_morning_collection())
-        self.afternoon_task = asyncio.create_task(self._schedule_afternoon_collection())
-        self.cookie_morning_task = asyncio.create_task(self._schedule_cookie_refresh(time(5, 40, 0), "morning"))
-        self.cookie_afternoon_task = asyncio.create_task(self._schedule_cookie_refresh(time(15, 10, 0), "afternoon"))
+        self.morning_task = asyncio.create_task(
+            self._schedule_morning_collection(schedule_config.collection_morning)
+        )
+        self.afternoon_task = asyncio.create_task(
+            self._schedule_afternoon_collection(schedule_config.collection_afternoon)
+        )
+        self.cookie_morning_task = asyncio.create_task(
+            self._schedule_cookie_refresh(schedule_config.cookie_refresh_morning, "morning")
+        )
+        self.cookie_afternoon_task = asyncio.create_task(
+            self._schedule_cookie_refresh(schedule_config.cookie_refresh_afternoon, "afternoon")
+        )
 
-        logger.info("Schedulers started — cookie refresh at 5:40 AM / 3:10 PM, collection at 5:45 AM / 3:15 PM")
+        logger.info(
+            "Schedulers started — cookie refresh at %s / %s, collection at %s / %s",
+            schedule_config.cookie_refresh_morning.strftime("%H:%M"),
+            schedule_config.cookie_refresh_afternoon.strftime("%H:%M"),
+            schedule_config.collection_morning.strftime("%H:%M"),
+            schedule_config.collection_afternoon.strftime("%H:%M"),
+        )
 
     async def stop_scheduler(self):
         """Stop all scheduled tasks."""
@@ -64,41 +92,31 @@ class Scheduler:
 
         logger.info("Collection scheduler stopped")
 
-    async def _schedule_morning_collection(self):
-        """Schedule collection to start at 5:45 AM daily."""
+    async def _schedule_morning_collection(self, target_time: time):
+        """Schedule collection to start at target_time daily."""
         while self.is_running:
             now = datetime.now(ZoneInfo("America/Bogota"))
-            target_time = time(5, 45, 0)  # 5:45 AM
-            
-            # Calculate next run time
             next_run = datetime.combine(now.date(), target_time).replace(tzinfo=ZoneInfo("America/Bogota"))
             if now >= next_run:
                 next_run = next_run.replace(day=next_run.day + 1)
-            
             wait_seconds = (next_run - now).total_seconds()
-            logger.info(f"Morning collection scheduled for {next_run} ({wait_seconds:.0f} seconds from now)")
-            
+            logger.info("Morning collection scheduled for %s at %s (%.0fs from now)",
+                        next_run.date(), target_time.strftime("%H:%M"), wait_seconds)
             await asyncio.sleep(wait_seconds)
-            
             if self.is_running:
                 await self._start_collection_if_not_running("morning")
 
-    async def _schedule_afternoon_collection(self):
-        """Schedule collection to start at 3:15 PM daily."""
+    async def _schedule_afternoon_collection(self, target_time: time):
+        """Schedule collection to start at target_time daily."""
         while self.is_running:
             now = datetime.now(ZoneInfo("America/Bogota"))
-            target_time = time(15, 15, 0)  # 3:15 PM
-            
-            # Calculate next run time
             next_run = datetime.combine(now.date(), target_time).replace(tzinfo=ZoneInfo("America/Bogota"))
             if now >= next_run:
                 next_run = next_run.replace(day=next_run.day + 1)
-            
             wait_seconds = (next_run - now).total_seconds()
-            logger.info(f"Afternoon collection scheduled for {next_run} ({wait_seconds:.0f} seconds from now)")
-            
+            logger.info("Afternoon collection scheduled for %s at %s (%.0fs from now)",
+                        next_run.date(), target_time.strftime("%H:%M"), wait_seconds)
             await asyncio.sleep(wait_seconds)
-            
             if self.is_running:
                 await self._start_collection_if_not_running("afternoon")
 
@@ -110,7 +128,8 @@ class Scheduler:
             if now >= next_run:
                 next_run = next_run.replace(day=next_run.day + 1)
             wait_seconds = (next_run - now).total_seconds()
-            logger.info("Cookie refresh (%s) scheduled for %s (%.0fs from now)", label, next_run, wait_seconds)
+            logger.info("Cookie refresh (%s) at %s scheduled for %s (%.0fs from now)",
+                        label, target_time.strftime("%H:%M"), next_run, wait_seconds)
             await asyncio.sleep(wait_seconds)
             if self.is_running and self.collection_manager is not None:
                 try:
@@ -151,8 +170,9 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to initialize Redis message queue: {e}. Running without messaging.")
         message_queue = None
     
+    schedule_config = load_schedule_config(_DEFAULT_SCHEDULE_PATH)
     scheduler.set_collection_manager(collection_manager)
-    await scheduler.start_scheduler()
+    await scheduler.start_scheduler(schedule_config=schedule_config)
     logger.info("FastAPI application startup complete - scheduler running")
     
     yield
@@ -329,7 +349,7 @@ async def get_collection_status():
     # Add scheduler info to the status
     status_dict = status.dict()
     status_dict["scheduler_running"] = scheduler.is_running
-    status_dict["scheduled_times"] = "6:00 AM and 3:15 PM daily"
+    status_dict["scheduled_times"] = scheduler.scheduled_times_label
     return CollectionStatusResponse(**status_dict)
 
 @app.post("/scheduler/start")
@@ -356,8 +376,7 @@ async def get_scheduler_status():
     return {
         "scheduler_running": scheduler.is_running,
         "collection_running": collection_manager._is_running,
-        "next_morning_run": "6:00 AM daily",
-        "next_afternoon_run": "3:15 PM daily",
+        "scheduled_times": scheduler.scheduled_times_label,
         "timezone": "America/Bogota"
     }
 
