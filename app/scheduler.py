@@ -38,6 +38,10 @@ class Scheduler:
             "morning":   {"last_outcome": None, "completed_at": None},
             "afternoon": {"last_outcome": None, "completed_at": None},
         }
+        self._guardian_current_state: dict = {
+            "morning":   GuardianState.IDLE.value,
+            "afternoon": GuardianState.IDLE.value,
+        }
 
     def set_collection_manager(self, manager):
         self.collection_manager = manager
@@ -153,16 +157,18 @@ class Scheduler:
         return {
             "morning": {
                 "task_running": _task_running(self.morning_guardian_task),
+                "current_state": self._guardian_current_state["morning"],
                 **self._guardian_outcomes["morning"],
             },
             "afternoon": {
                 "task_running": _task_running(self.afternoon_guardian_task),
+                "current_state": self._guardian_current_state["afternoon"],
                 **self._guardian_outcomes["afternoon"],
             },
         }
 
     async def _run_and_record(self, slot_name: str, slot: JobSlot, adapter) -> GuardianState:
-        outcome = await self._watch_slot(slot, adapter)
+        outcome = await self._watch_slot(slot, adapter, slot_name=slot_name)
         self._guardian_outcomes[slot_name] = {
             "last_outcome": outcome.value,
             "completed_at": datetime.now(ZoneInfo("America/Bogota")).isoformat(),
@@ -190,8 +196,12 @@ class Scheduler:
         else:
             raise ValueError(f"Unknown slot: {slot_name!r}. Valid values: morning, afternoon")
 
-    async def _watch_slot(self, slot: JobSlot, adapter) -> GuardianState:
+    async def _watch_slot(self, slot: JobSlot, adapter, slot_name: str = "") -> GuardianState:
         """Guardian coroutine: watches one slot and ensures the collection fires."""
+        def _set(state: GuardianState) -> None:
+            if slot_name:
+                self._guardian_current_state[slot_name] = state.value
+
         tz = ZoneInfo("America/Bogota")
         now = datetime.now(tz)
         today = now.date()
@@ -201,8 +211,11 @@ class Scheduler:
         grace_dt = fire_dt + timedelta(minutes=slot.grace_minutes)
         window_close_dt = datetime.combine(today, slot.window_close).replace(tzinfo=tz)
 
+        _set(GuardianState.IDLE)
+
         # Already past window_close — nothing to do
         if now >= window_close_dt:
+            _set(GuardianState.MISSED)
             logger.warning("Guardian: slot missed — woke after window_close (%s)", slot.window_close)
             return GuardianState.MISSED
 
@@ -212,26 +225,27 @@ class Scheduler:
             await asyncio.sleep(wait)
 
         # Watching loop — poll until a terminal state
-        state = GuardianState.WATCHING
-        while state == GuardianState.WATCHING:
+        _set(GuardianState.WATCHING)
+        while True:
             now = datetime.now(tz)
 
             if now >= window_close_dt:
+                _set(GuardianState.MISSED)
                 logger.warning("Guardian: slot missed — window closed with no collection started")
                 return GuardianState.MISSED
 
             if adapter.is_running():
+                _set(GuardianState.STARTED)
                 logger.info("Guardian: collection already running — slot covered")
                 return GuardianState.STARTED
 
             if now >= grace_dt:
                 logger.info("Guardian: past fire+grace, starting collection")
                 await adapter.start()
+                _set(GuardianState.STARTED)
                 return GuardianState.STARTED
 
             await asyncio.sleep(GUARDIAN_POLL_INTERVAL)
-
-        return state  # unreachable, but satisfies type checkers
 
     async def _start_collection_if_not_running(self, schedule_type: str):
         try:
