@@ -1,12 +1,22 @@
 import asyncio
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
+from enum import Enum
 from zoneinfo import ZoneInfo
 
-from app.config import ScheduleConfig, load_schedule_config
+from app.config import JobSlot, ScheduleConfig, load_schedule_config
 from app.cookie_refresh import run_refresh
 
 logger = logging.getLogger(__name__)
+
+GUARDIAN_POLL_INTERVAL = 30  # seconds
+
+
+class GuardianState(Enum):
+    IDLE = "idle"
+    WATCHING = "watching"
+    STARTED = "started"
+    MISSED = "missed"
 
 
 class Scheduler:
@@ -126,6 +136,49 @@ class Scheduler:
                     await run_refresh(self.collection_manager)
                 except Exception as exc:
                     logger.error("Proactive cookie refresh (%s) failed: %s", label, exc)
+
+    async def _watch_slot(self, slot: JobSlot, adapter) -> GuardianState:
+        """Guardian coroutine: watches one slot and ensures the collection fires."""
+        tz = ZoneInfo("America/Bogota")
+        now = datetime.now(tz)
+        today = now.date()
+
+        window_open_dt = datetime.combine(today, slot.window_open).replace(tzinfo=tz)
+        fire_dt = datetime.combine(today, slot.fire_time).replace(tzinfo=tz)
+        grace_dt = fire_dt + timedelta(minutes=slot.grace_minutes)
+        window_close_dt = datetime.combine(today, slot.window_close).replace(tzinfo=tz)
+
+        # Already past window_close — nothing to do
+        if now >= window_close_dt:
+            logger.warning("Guardian: slot missed — woke after window_close (%s)", slot.window_close)
+            return GuardianState.MISSED
+
+        # Sleep until window opens
+        if now < window_open_dt:
+            wait = (window_open_dt - now).total_seconds()
+            await asyncio.sleep(wait)
+
+        # Watching loop — poll until a terminal state
+        state = GuardianState.WATCHING
+        while state == GuardianState.WATCHING:
+            now = datetime.now(tz)
+
+            if now >= window_close_dt:
+                logger.warning("Guardian: slot missed — window closed with no collection started")
+                return GuardianState.MISSED
+
+            if adapter.is_running():
+                logger.info("Guardian: collection already running — slot covered")
+                return GuardianState.STARTED
+
+            if now >= grace_dt:
+                logger.info("Guardian: past fire+grace, starting collection")
+                await adapter.start()
+                return GuardianState.STARTED
+
+            await asyncio.sleep(GUARDIAN_POLL_INTERVAL)
+
+        return state  # unreachable, but satisfies type checkers
 
     async def _start_collection_if_not_running(self, schedule_type: str):
         try:

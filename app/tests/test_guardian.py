@@ -123,10 +123,12 @@ class TestGuardianWatchingToStarted:
         mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
         mock_adapter.start = AsyncMock()
 
-        # Simulate: now = 05:20, collection starts running after first poll
-        clock = [_dt(5, 20), _dt(5, 50)]
+        # Clock values: [initial check, loop iter 1 (before grace), loop iter 2 (before grace)]
+        # _watch_slot calls datetime.now() once at the top (init) then once per loop iteration.
+        clock = [_dt(5, 20), _dt(5, 40), _dt(5, 40)]
         clock_iter = iter(clock)
 
+        # iter 1: not running yet; iter 2: running (started externally)
         mock_adapter.is_running.side_effect = [False, True]
 
         sleep_calls = []
@@ -161,8 +163,8 @@ class TestGuardianSelfStart:
         mock_adapter.start = AsyncMock()
 
         # fire_time=05:45, grace=5 min → guardian fires at 05:50
-        # Now is already past that threshold; collection never started
-        clock = [_dt(5, 51)]
+        # Provide two identical timestamps: [initial check, loop iteration 1]
+        clock = [_dt(5, 51), _dt(5, 51)]
         clock_iter = iter(clock)
         mock_adapter.is_running.return_value = False
 
