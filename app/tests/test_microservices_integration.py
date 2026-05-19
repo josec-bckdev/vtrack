@@ -55,10 +55,11 @@ class TestCollectionManagerRedisIntegration:
         ASSERT: Data is both saved to DB and queued
         """
         from app.scraper_async import AsyncCollectionManager
-        from shared.message_queue import MessageQueue
-        
+        from app.adapters.route_repository import SqlAlchemyRouteRepository
+
         # Arrange
-        manager = AsyncCollectionManager()
+        repo = SqlAlchemyRouteRepository(get_session=lambda: db_session)
+        manager = AsyncCollectionManager(repository=repo)
         queue = MagicMock()
         queue.push_coordinate = MagicMock(return_value=True)
         manager.message_queue = queue

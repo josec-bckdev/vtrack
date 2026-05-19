@@ -18,7 +18,7 @@ class SqlAlchemyRouteRepository(IRouteDataRepository):
 
     def __init__(self, get_session: Optional[Callable] = None):
         if get_session is None:
-            from app.scraper_async import get_db_session
+            from app.database import get_db_session
             get_session = lambda: next(get_db_session())  # noqa: E731
         self._get_session = get_session
 

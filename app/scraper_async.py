@@ -13,7 +13,7 @@ from app.models import (
     CollectionStatusEnum,
     CollectionStatusResponse,
 )
-from app.database import SessionLocal
+from app.database import SessionLocal, get_db_session  # noqa: F401 — re-exported for compat
 from app.domain.scraper import (
     parse_remote_datetime,
     normalize_route_data,
@@ -44,14 +44,6 @@ COOKIE_REFRESHER_URL = os.environ.get("COOKIE_REFRESHER_URL", "http://localhost:
 COOKIE_REFRESHER_TIMEOUT = 300  # seconds — agent loop takes ~18 steps / ~3 min
 
 collection_manager = None
-
-
-def get_db_session():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 class AsyncCollectionManager:

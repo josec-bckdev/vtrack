@@ -41,5 +41,14 @@ def get_db():
     finally:
         db.close()
 
+
+def get_db_session():
+    """Session factory for non-FastAPI consumers (e.g. SqlAlchemyRouteRepository)."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 # Initialize the database immediately when the module is imported
 # The lifespan event in main.py will call init_db() on startup.

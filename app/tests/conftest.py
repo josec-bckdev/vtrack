@@ -136,20 +136,9 @@ def override_get_db(db_session: Session):
 
     app.dependency_overrides[get_db] = _override_get_db
 
-    # Also mock the scraper_async get_db_session to use our test session
-    from app import scraper_async
-    original_get_db = scraper_async.get_db_session
-
-    def mock_get_db_session():
-        yield db_session
-
-    scraper_async.get_db_session = mock_get_db_session
-
     yield
 
-    # Cleanup
     app.dependency_overrides.clear()
-    scraper_async.get_db_session = original_get_db
 
 
 # =============================================================================
