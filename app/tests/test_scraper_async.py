@@ -439,19 +439,19 @@ class TestAsyncCollectionManagerLifecycle:
     @pytest.mark.asyncio
     async def test_start_collection_initializes_metadata(
         self,
-        clean_collection_manager,
+        collection_manager_with_db,
         db_session,
         mock_scraper_credentials,
         mock_httpx_client
     ):
         """
         WHY: Starting collection should create a metadata record.
-        ARRANGE: Clean manager
+        ARRANGE: Manager wired to real test DB
         ACT: Start collection
         ASSERT: Metadata is created in database
         """
         # Arrange
-        manager = clean_collection_manager
+        manager = collection_manager_with_db
 
         # Mock the collection loop to exit immediately
         async def mock_loop():
@@ -544,19 +544,19 @@ class TestAsyncCollectionManagerLifecycle:
     @pytest.mark.asyncio
     async def test_save_route_data_increments_counter(
         self,
-        clean_collection_manager,
+        collection_manager_with_db,
         db_session,
         sample_route_data,
         mock_scraper_credentials
     ):
         """
         WHY: Each saved datapoint should increment the counter.
-        ARRANGE: Manager with initialized task
+        ARRANGE: Manager wired to real test DB
         ACT: Save route data
         ASSERT: Counter increments and data is in DB
         """
         # Arrange
-        manager = clean_collection_manager
+        manager = collection_manager_with_db
 
         # Initialize metadata
         async def mock_loop():
@@ -891,7 +891,7 @@ class TestSaveRouteDataExceptionPath:
     async def test_db_error_triggers_rollback_and_raises(
         self, clean_collection_manager, db_session, sample_route_data, mock_scraper_credentials
     ):
-        """WHY: A DB insert failure must rollback the transaction and re-raise."""
+        """WHY: A repository failure must propagate out of _save_route_data_async."""
         manager = clean_collection_manager
 
         async def mock_loop():
@@ -902,6 +902,6 @@ class TestSaveRouteDataExceptionPath:
             await manager.start()
             await asyncio.sleep(0.1)
 
-        with patch("app.scraper_async.RouteDataEntry", side_effect=Exception("db error")):
-            with pytest.raises(Exception, match="db error"):
-                await manager._save_route_data_async(sample_route_data)
+        manager._repository.save_route_entry.side_effect = Exception("db error")
+        with pytest.raises(Exception, match="db error"):
+            await manager._save_route_data_async(sample_route_data)

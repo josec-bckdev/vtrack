@@ -11,8 +11,6 @@ from httpx import RequestError
 from app.models import (
     ScrapingResponse,
     CollectionStatusEnum,
-    RouteDataEntry,
-    CollectionMetadata,
     CollectionStatusResponse,
 )
 from app.database import SessionLocal
@@ -22,6 +20,7 @@ from app.domain.scraper import (
     should_start_collection,
     should_stop_collection,
 )
+from app.domain.ports import IRouteDataRepository
 from shared.message_queue import MessageQueue
 
 # Setup logging
@@ -56,7 +55,11 @@ def get_db_session():
 
 
 class AsyncCollectionManager:
-    def __init__(self, message_queue: Optional[MessageQueue] = None):
+    def __init__(
+        self,
+        message_queue: Optional[MessageQueue] = None,
+        repository: Optional[IRouteDataRepository] = None,
+    ):
         self._task: asyncio.Task | None = None
         self._is_running = False
         self._status: CollectionStatusEnum = CollectionStatusEnum.IDLE
@@ -75,6 +78,12 @@ class AsyncCollectionManager:
 
         # Persistent httpx client to maintain session and connection pooling
         self._client: Optional[httpx.AsyncClient] = None
+
+        # Lazy import avoids circular dependency at module load time
+        if repository is None:
+            from app.adapters.route_repository import SqlAlchemyRouteRepository
+            repository = SqlAlchemyRouteRepository()
+        self._repository: IRouteDataRepository = repository
 
     def _is_session_valid(self) -> bool:
         if not self._last_login_time or not self._session_cookies:
@@ -212,27 +221,15 @@ class AsyncCollectionManager:
 
     async def _set_status_async(self, status: CollectionStatusEnum):
         self._status = status
-
-        db_gen = get_db_session()
-        db = next(db_gen)
-
-        try:
-            if self.current_task_id is not None:
-                metadata = db.query(CollectionMetadata).get(self.current_task_id)
-                if metadata:
-                    metadata.status = self._status.value
-                    metadata.last_update_time = datetime.now(ZoneInfo("America/Bogota"))
-
-                    if status in [
-                        CollectionStatusEnum.IDLE,
-                        CollectionStatusEnum.FINISHED,
-                    ]:
-                        metadata.stop_time = datetime.now(ZoneInfo("America/Bogota"))
-                        self.stop_time = metadata.stop_time
-
-                    db.commit()
-        finally:
-            db.close()
+        update_time = datetime.now(ZoneInfo("America/Bogota"))
+        stop_time = None
+        if status in [CollectionStatusEnum.IDLE, CollectionStatusEnum.FINISHED]:
+            stop_time = update_time
+            self.stop_time = stop_time
+        if self.current_task_id is not None:
+            self._repository.update_task_status(
+                self.current_task_id, status, update_time, stop_time
+            )
 
     def _should_start_collection(self, normalized_data: dict) -> bool:
         return should_start_collection(normalized_data)
@@ -257,46 +254,29 @@ class AsyncCollectionManager:
         return False
 
     async def _save_route_data_async(self, normalized_data: dict):
-        db_gen = get_db_session()
-        db = next(db_gen)
+        self._repository.save_route_entry(normalized_data)
+        self.datapoints_collected += 1
+        if self.current_task_id is not None:
+            self._repository.update_task_datapoints(
+                self.current_task_id, self.datapoints_collected
+            )
+        logger.info(f"Saved route data for ruta {normalized_data['ruta']}")
 
-        try:
-            route_entry = RouteDataEntry(**normalized_data)
-            db.add(route_entry)
-            db.commit()
-
-            self.datapoints_collected += 1
-            if self.current_task_id is not None:
-                metadata = db.query(CollectionMetadata).get(self.current_task_id)
-                if metadata:
-                    metadata.datapoints_count = self.datapoints_collected
-                    db.commit()
-
-            logger.info(f"Saved route data for ruta {normalized_data['ruta']}")
-
-            # Push coordinate to Redis queue for alert processing
-            if self.message_queue:
-                try:
-                    self.message_queue.push_coordinate(
-                        ruta=normalized_data["ruta"],
-                        latitude=normalized_data["ns_latitude"],
-                        longitude=normalized_data["ew_longitude"],
-                        position_ts=normalized_data.get("position_ts"),
-                        route_status=normalized_data.get("route_status"),
-                        student_status=normalized_data.get("student_status"),
-                    )
-                    logger.debug(
-                        f"Pushed coordinate to queue for ruta {normalized_data['ruta']}"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to push coordinate to queue: {e}")
-
-        except Exception as e:
-            logger.error(f"Error saving route data: {e}")
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        if self.message_queue:
+            try:
+                self.message_queue.push_coordinate(
+                    ruta=normalized_data["ruta"],
+                    latitude=normalized_data["ns_latitude"],
+                    longitude=normalized_data["ew_longitude"],
+                    position_ts=normalized_data.get("position_ts"),
+                    route_status=normalized_data.get("route_status"),
+                    student_status=normalized_data.get("student_status"),
+                )
+                logger.debug(
+                    f"Pushed coordinate to queue for ruta {normalized_data['ruta']}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to push coordinate to queue: {e}")
 
     async def _collection_loop(self):
         logger.info(f"Collection loop started (Task: {self.current_task_id})")
@@ -340,26 +320,12 @@ class AsyncCollectionManager:
             await asyncio.sleep(COLLECTION_INTERVAL_SECONDS)
 
     async def _initialize_metadata_async(self):
-        db_gen = get_db_session()
-        db = next(db_gen)
-
-        try:
-            metadata_entry = CollectionMetadata(
-                start_time=datetime.now(ZoneInfo("America/Bogota")),
-                status=CollectionStatusEnum.IDLE.value,
-                last_update_time=datetime.now(ZoneInfo("America/Bogota")),
-            )
-            db.add(metadata_entry)
-            db.commit()
-
-            self.current_task_id = metadata_entry.id
-            self.datapoints_collected = 0
-            self.start_time = metadata_entry.start_time
-            self.stop_time = None
-            self.last_data_hash = None
-
-        finally:
-            db.close()
+        start_time = datetime.now(ZoneInfo("America/Bogota"))
+        self.current_task_id = self._repository.create_task(start_time)
+        self.datapoints_collected = 0
+        self.start_time = start_time
+        self.stop_time = None
+        self.last_data_hash = None
 
     async def start(self) -> Literal[True]:
         async with self._lock:

@@ -314,17 +314,45 @@ def mock_httpx_client(mock_successful_login_response, mock_valores_data, mock_es
 # =============================================================================
 
 @pytest.fixture
-def clean_collection_manager(db_session, mock_scraper_credentials):
+def clean_collection_manager():
     """
-    Provides a fresh AsyncCollectionManager instance for testing.
+    Provides a fresh AsyncCollectionManager with a mock repository.
 
-    Why create a new instance per test?
-    - Prevents state leakage between tests
-    - Each test starts with a clean slate
-    - Easier to reason about test behavior
+    Uses MagicMock(spec=IRouteDataRepository) so no DB is needed.
+    create_task returns 1 so current_task_id is a valid int for Pydantic.
     """
-    manager = AsyncCollectionManager()
-    # Reset all state
+    from unittest.mock import MagicMock
+    from app.domain.ports import IRouteDataRepository
+
+    mock_repo = MagicMock(spec=IRouteDataRepository)
+    mock_repo.create_task.return_value = 1
+
+    manager = AsyncCollectionManager(repository=mock_repo)
+    manager._task = None
+    manager._is_running = False
+    manager.current_task_id = None
+    manager.last_data_hash = None
+    manager.datapoints_collected = 0
+    manager.start_time = None
+    manager.stop_time = None
+    manager._last_login_time = None
+    manager._session_cookies = None
+
+    return manager
+
+
+@pytest.fixture
+def collection_manager_with_db(db_session):
+    """
+    Provides an AsyncCollectionManager wired to the in-memory test DB.
+
+    Use this fixture only for tests that assert on actual database state.
+    For all other manager tests, prefer clean_collection_manager.
+    """
+    from app.adapters.route_repository import SqlAlchemyRouteRepository
+
+    repo = SqlAlchemyRouteRepository(get_session=lambda: db_session)
+    manager = AsyncCollectionManager(repository=repo)
     manager._task = None
     manager._is_running = False
     manager.current_task_id = None
