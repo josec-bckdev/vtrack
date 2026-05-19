@@ -39,10 +39,12 @@ Usage:
 
 import json
 import logging
+import os
 import time
 import signal
 import sys
 from opentelemetry import trace
+from tracing import configure_tracing
 from shared.message_queue import MessageQueue
 from config import settings
 from providers.telegram import TelegramNotifier
@@ -210,6 +212,11 @@ class NotificationConsumer:
         logger.info("=" * 40)
 
 def main():
+    otlp_endpoint = os.getenv("OTLP_ENDPOINT", "")
+    if otlp_endpoint:
+        configure_tracing("notification-sender", otlp_endpoint)
+        logger.info("OTel tracing configured — exporting to %s", otlp_endpoint)
+
     consumer = NotificationConsumer()
     
     # ==================== SIGNAL HANDLER REGISTRATION ====================
