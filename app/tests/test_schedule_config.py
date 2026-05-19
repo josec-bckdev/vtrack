@@ -1,5 +1,5 @@
 """
-Tests for ScheduleConfig YAML loader and Scheduler config injection.
+Tests for ScheduleConfig YAML loader, JobSlot dataclass, and Scheduler config injection.
 
 RED phase: all tests here should fail before implementation.
 """
@@ -13,13 +13,68 @@ from unittest.mock import MagicMock, patch
 from app.config import ScheduleConfig, load_schedule_config
 
 
+# New nested YAML format with per-slot window + fire_time + grace
 VALID_CONFIG = {
     "timezone": "America/Bogota",
     "schedule": {
         "cookie_refresh": {"morning": "05:40", "afternoon": "15:10"},
-        "collection": {"morning": "05:45", "afternoon": "15:15"},
+        "collection": {
+            "morning": {
+                "window_open":   "05:00",
+                "fire_time":     "05:45",
+                "grace_minutes": 5,
+                "window_close":  "06:40",
+            },
+            "afternoon": {
+                "window_open":   "14:30",
+                "fire_time":     "15:15",
+                "grace_minutes": 5,
+                "window_close":  "16:30",
+            },
+        },
     },
 }
+
+
+# =============================================================================
+# JobSlot contract tests
+# =============================================================================
+
+class TestJobSlotContract:
+
+    def test_job_slot_is_importable(self):
+        from app.config import JobSlot
+        assert JobSlot is not None
+
+    def test_job_slot_has_required_fields(self):
+        from app.config import JobSlot
+        slot = JobSlot(
+            window_open=time(5, 0),
+            fire_time=time(5, 45),
+            grace_minutes=5,
+            window_close=time(6, 40),
+        )
+        assert slot.window_open == time(5, 0)
+        assert slot.fire_time == time(5, 45)
+        assert slot.grace_minutes == 5
+        assert slot.window_close == time(6, 40)
+
+    def test_job_slot_is_frozen(self):
+        from app.config import JobSlot
+        slot = JobSlot(
+            window_open=time(5, 0),
+            fire_time=time(5, 45),
+            grace_minutes=5,
+            window_close=time(6, 40),
+        )
+        with pytest.raises((AttributeError, TypeError)):
+            slot.fire_time = time(6, 0)
+
+    def test_job_slots_are_equal_when_fields_match(self):
+        from app.config import JobSlot
+        a = JobSlot(time(5, 0), time(5, 45), 5, time(6, 40))
+        b = JobSlot(time(5, 0), time(5, 45), 5, time(6, 40))
+        assert a == b
 
 
 # =============================================================================
@@ -48,15 +103,27 @@ class TestLoadScheduleConfig:
         p.write_text(yaml.dump(VALID_CONFIG))
         assert load_schedule_config(p).cookie_refresh_afternoon == time(15, 10)
 
-    def test_parses_collection_morning(self, tmp_path):
+    def test_parses_collection_morning_as_job_slot(self, tmp_path):
+        from app.config import JobSlot
         p = tmp_path / "schedule.yaml"
         p.write_text(yaml.dump(VALID_CONFIG))
-        assert load_schedule_config(p).collection_morning == time(5, 45)
+        slot = load_schedule_config(p).collection_morning
+        assert isinstance(slot, JobSlot)
+        assert slot.window_open == time(5, 0)
+        assert slot.fire_time == time(5, 45)
+        assert slot.grace_minutes == 5
+        assert slot.window_close == time(6, 40)
 
-    def test_parses_collection_afternoon(self, tmp_path):
+    def test_parses_collection_afternoon_as_job_slot(self, tmp_path):
+        from app.config import JobSlot
         p = tmp_path / "schedule.yaml"
         p.write_text(yaml.dump(VALID_CONFIG))
-        assert load_schedule_config(p).collection_afternoon == time(15, 15)
+        slot = load_schedule_config(p).collection_afternoon
+        assert isinstance(slot, JobSlot)
+        assert slot.window_open == time(14, 30)
+        assert slot.fire_time == time(15, 15)
+        assert slot.grace_minutes == 5
+        assert slot.window_close == time(16, 30)
 
     def test_missing_schedule_key_raises(self, tmp_path):
         p = tmp_path / "schedule.yaml"
@@ -69,7 +136,16 @@ class TestLoadScheduleConfig:
             "timezone": "America/Bogota",
             "schedule": {
                 "cookie_refresh": {"morning": "5:40 AM", "afternoon": "15:10"},
-                "collection": {"morning": "05:45", "afternoon": "15:15"},
+                "collection": {
+                    "morning": {
+                        "window_open": "05:00", "fire_time": "05:45",
+                        "grace_minutes": 5, "window_close": "06:40",
+                    },
+                    "afternoon": {
+                        "window_open": "14:30", "fire_time": "15:15",
+                        "grace_minutes": 5, "window_close": "16:30",
+                    },
+                },
             },
         }
         p = tmp_path / "schedule.yaml"
@@ -83,7 +159,16 @@ class TestLoadScheduleConfig:
 # =============================================================================
 
 class TestSchedulerUsesConfigTimes:
-    """_schedule_morning/afternoon_collection now take target_time as a param."""
+    """_schedule_morning/afternoon_collection take fire_time extracted from JobSlot."""
+
+    def _make_slot(self, fire_hour: int, fire_minute: int):
+        from app.config import JobSlot
+        return JobSlot(
+            window_open=time(fire_hour - 1, 0),
+            fire_time=time(fire_hour, fire_minute),
+            grace_minutes=5,
+            window_close=time(fire_hour + 1, 0),
+        )
 
     @pytest.mark.asyncio
     async def test_morning_collection_uses_provided_time(self):
@@ -142,7 +227,7 @@ class TestSchedulerUsesConfigTimes:
         assert abs(sleep_calls[0] - expected_wait) < 2
 
     @pytest.mark.asyncio
-    async def test_start_scheduler_passes_collection_morning_from_config(self):
+    async def test_start_scheduler_passes_collection_morning_fire_time_from_config(self):
         from unittest.mock import AsyncMock
         from app.main import Scheduler
         from app.config import ScheduleConfig
@@ -151,8 +236,8 @@ class TestSchedulerUsesConfigTimes:
             timezone="America/Bogota",
             cookie_refresh_morning=time(5, 40),
             cookie_refresh_afternoon=time(15, 10),
-            collection_morning=time(7, 0),
-            collection_afternoon=time(16, 0),
+            collection_morning=self._make_slot(7, 0),
+            collection_afternoon=self._make_slot(16, 0),
         )
         scheduler = Scheduler()
         scheduler.set_collection_manager(MagicMock())
@@ -161,8 +246,6 @@ class TestSchedulerUsesConfigTimes:
         mock_afternoon = AsyncMock()
         mock_cookie = AsyncMock()
 
-        # asyncio.create_task(fn(args)) calls fn(args) synchronously to get the
-        # coroutine — so call_args is recorded before the task body runs.
         with patch.object(scheduler, "_schedule_morning_collection", mock_morning), \
              patch.object(scheduler, "_schedule_afternoon_collection", mock_afternoon), \
              patch.object(scheduler, "_schedule_cookie_refresh", mock_cookie):
@@ -185,8 +268,8 @@ class TestSchedulerUsesConfigTimes:
             timezone="America/Bogota",
             cookie_refresh_morning=time(6, 0),
             cookie_refresh_afternoon=time(14, 0),
-            collection_morning=time(5, 45),
-            collection_afternoon=time(15, 15),
+            collection_morning=self._make_slot(5, 45),
+            collection_afternoon=self._make_slot(15, 15),
         )
         scheduler = Scheduler()
         scheduler.set_collection_manager(MagicMock())
