@@ -3,7 +3,10 @@ import logging
 import os
 from datetime import time
 
+from opentelemetry.instrumentation.httpx import AsyncOpenTelemetryTransport
+
 from conductor.adapters.container_gateway import DockerContainerGateway
+from conductor.adapters.tracing import configure_tracing
 from conductor.adapters.vtrack_gateway import HttpxVtrackGateway
 from conductor.conductor import Conductor, SlotConfig
 
@@ -33,8 +36,17 @@ def _load_slots() -> dict[str, SlotConfig]:
 
 
 async def main() -> None:
+    otlp_endpoint = os.environ.get("OTLP_ENDPOINT", "")
+    if otlp_endpoint:
+        configure_tracing("conductor", otlp_endpoint)
+        transport: AsyncOpenTelemetryTransport | None = AsyncOpenTelemetryTransport()
+        logger.info("OTel tracing configured — exporting to %s", otlp_endpoint)
+    else:
+        transport = None
+
     gateway = HttpxVtrackGateway(
-        base_url=os.environ.get("VTRACK_BASE_URL", "http://api:8000")
+        base_url=os.environ.get("VTRACK_BASE_URL", "http://api:8000"),
+        transport=transport,
     )
     containers = DockerContainerGateway()
     managed = [

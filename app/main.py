@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,10 +13,10 @@ from app.models import CollectionStatusResponse, CollectionStatusEnum
 from app.config import load_schedule_config
 from app.scheduler import Scheduler
 from shared.message_queue import MessageQueue
-import os
 
 from app.cookie_refresh import run_refresh
 from app import monitoring as _monitoring
+from app.tracing import configure_tracing
 
 _DEFAULT_SCHEDULE_PATH = Path(__file__).parent / "schedule.yaml"
 
@@ -31,6 +32,11 @@ async def lifespan(app: FastAPI):
     Handles application startup and shutdown events.
     """
     # Startup
+    otlp_endpoint = os.getenv("OTLP_ENDPOINT", "")
+    if otlp_endpoint:
+        configure_tracing("vtrack", otlp_endpoint)
+        logger.info("OTel tracing configured — exporting to %s", otlp_endpoint)
+
     init_db()
     
     # Initialize Redis message queue
