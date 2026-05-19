@@ -42,9 +42,12 @@ import logging
 import time
 import signal
 import sys
+from opentelemetry import trace
 from shared.message_queue import MessageQueue
 from config import settings
 from providers.telegram import TelegramNotifier
+
+_tracer = trace.get_tracer(__name__)
 
 # Setup logging
 logging.basicConfig(
@@ -129,6 +132,27 @@ class NotificationConsumer:
         logger.info("Finishing current task and shutting down...")
         self.running = False
     
+    def _process_alert_queue(self):
+        """Process one alert from the queue, emitting a trace span."""
+        alert_data = self.redis_queue.pop_alert()
+
+        if alert_data:
+            with _tracer.start_as_current_span("notification_sender.alert.send") as span:
+                span.set_attribute("alert.ruta", alert_data.get("ruta", 0))
+                span.set_attribute("alert.type", alert_data.get("alert_type", ""))
+                span.set_attribute("notification.provider", "telegram")
+
+                success = self.telegram.send_alert(alert_data)
+                span.set_attribute("notification.success", bool(success))
+
+                if success:
+                    self.processed += 1
+                    logger.info(f"📊 Total alerts sent: {self.processed}")
+                else:
+                    logger.error(f"Failed to send alert for ruta {alert_data.get('ruta')}")
+        else:
+            time.sleep(settings.POLL_INTERVAL)
+
     def run(self):
         """Main loop"""
         logger.info("🚀 Starting VTRACK Notification Service")
@@ -165,20 +189,7 @@ class NotificationConsumer:
         #
         while self.running:
             try:
-                # Check for alerts
-                alert_data = self.redis_queue.pop_alert()
-                
-                if alert_data:
-                    # Send to Telegram
-                    success = self.telegram.send_alert(alert_data)
-                    
-                    if success:
-                        self.processed += 1
-                        logger.info(f"📊 Total alerts sent: {self.processed}")
-                else:
-                    # No alerts, wait a bit
-                    time.sleep(settings.POLL_INTERVAL)
-                    
+                self._process_alert_queue()
             except KeyboardInterrupt:
                 # NOTE: This is belt-and-suspenders error handling
                 # The signal handler SHOULD catch Ctrl+C (SIGINT) and set self.running=False
