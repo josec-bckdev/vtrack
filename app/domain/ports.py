@@ -38,6 +38,17 @@ class ICollectionStateStore(ABC):
         """Return a point-in-time snapshot of the current state."""
 
 
+class ICollectionStatusAdapter(ABC):
+
+    @abstractmethod
+    def is_running(self) -> bool:
+        """Return True if a collection is currently active."""
+
+    @abstractmethod
+    async def start(self) -> None:
+        """Start a new collection run."""
+
+
 class IRouteDataRepository(ABC):
 
     @abstractmethod
