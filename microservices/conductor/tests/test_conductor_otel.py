@@ -29,18 +29,25 @@ def _find_span(spans, name):
     return next((s for s in spans if s.name == name), None)
 
 
-@pytest.fixture(autouse=True)
-def span_exporter():
-    # Reset OTel global singleton so each test gets a clean provider.
-    trace_api._TRACER_PROVIDER = None
-    trace_api._TRACER_PROVIDER_SET_ONCE._done = False
-
+@pytest.fixture(scope="session")
+def _otel_provider():
+    """Session-scoped: configure the global TracerProvider once so the module-level
+    tracer in conductor.py resolves to this provider on first use and stays cached."""
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
+    trace_api._TRACER_PROVIDER = None
+    trace_api._TRACER_PROVIDER_SET_ONCE._done = False
     trace.set_tracer_provider(provider)
-    yield exporter
-    exporter.clear()
+    return exporter
+
+
+@pytest.fixture(autouse=True)
+def span_exporter(_otel_provider):
+    """Per-test: yield the shared exporter after clearing it so each test sees only
+    spans produced by its own execution."""
+    _otel_provider.clear()
+    yield _otel_provider
 
 
 def _make_gateway(*, healthy=True):

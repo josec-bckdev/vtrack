@@ -4,10 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from opentelemetry import trace
+
 from conductor.domain.ports import IContainerGateway, IVtrackGateway
 from conductor.domain.resource_policy import evaluate_savings, should_stop_after_slot
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 @dataclass(frozen=True)
 class SlotConfig:
@@ -84,22 +87,32 @@ class Conductor:
 
     async def _startup_slot(self, slot_name: str) -> bool:
         logger.info("=== Slot startup: %s ===", slot_name)
-        await self._start_all()
-        await self._wait_for_health()
-        await self._gateway.activate_guardian(slot_name)
+
+        with _tracer.start_as_current_span("conductor.container.start") as span:
+            span.set_attribute("containers.count", len(self._managed))
+            await self._start_all()
+
+        with _tracer.start_as_current_span("conductor.health.wait"):
+            await self._wait_for_health()
+
+        with _tracer.start_as_current_span("conductor.guardian.activate") as span:
+            span.set_attribute("slot.name", slot_name)
+            await self._gateway.activate_guardian(slot_name)
 
         stats = [await self._containers.get_stats(n) for n in self._managed]
         summary = evaluate_savings(stats)
+        decision = should_stop_after_slot(summary, self._threshold)
+
+        with _tracer.start_as_current_span("conductor.resource.eval") as span:
+            span.set_attribute("resource.total_memory_mb", round(summary.total_memory_mb, 1))
+            span.set_attribute("resource.total_cpu_percent", round(summary.total_cpu_percent, 1))
+            span.set_attribute("resource.decision", "stop" if decision else "keep")
+
         logger.info(
-            "Resource snapshot: %.0f MB / %.1f%% CPU across %d containers",
+            "Resource snapshot: %.0f MB / %.1f%% CPU across %d containers — decision: %s",
             summary.total_memory_mb,
             summary.total_cpu_percent,
             len(stats),
-        )
-        decision = should_stop_after_slot(summary, self._threshold)
-        logger.info(
-            "Stopping containers after slot would free %.0f MB — decision: %s",
-            summary.total_memory_mb,
             "STOP" if decision else "KEEP",
         )
         return decision
@@ -108,21 +121,23 @@ class Conductor:
 
     async def _watch_slot(self, slot_name: str) -> None:
         logger.info("Watching %s guardian until complete", slot_name)
-        while True:
-            status = await self._gateway.guardian_status()
-            slot_status = status.get(slot_name, {})
-            if not slot_status.get("task_running", False):
-                outcome = slot_status.get("last_outcome")
-                if outcome == "missed":
-                    logger.warning(
-                        "Guardian %s slot MISSED — collection did not fire", slot_name
-                    )
-                else:
-                    logger.info(
-                        "Guardian %s slot complete with outcome: %s", slot_name, outcome
-                    )
-                return
-            await asyncio.sleep(self._poll_interval)
+        with _tracer.start_as_current_span("conductor.slot.watch") as span:
+            while True:
+                status = await self._gateway.guardian_status()
+                slot_status = status.get(slot_name, {})
+                if not slot_status.get("task_running", False):
+                    outcome = slot_status.get("last_outcome")
+                    span.set_attribute("slot.outcome", outcome or "unknown")
+                    if outcome == "missed":
+                        logger.warning(
+                            "Guardian %s slot MISSED — collection did not fire", slot_name
+                        )
+                    else:
+                        logger.info(
+                            "Guardian %s slot complete with outcome: %s", slot_name, outcome
+                        )
+                    return
+                await asyncio.sleep(self._poll_interval)
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
