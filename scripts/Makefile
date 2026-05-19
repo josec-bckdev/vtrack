@@ -14,16 +14,29 @@ help: ## Display this help message
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Docker & Services
-build: ## Build the API Docker image (no cache)
+build: ## Build all Docker images (no cache)
+	docker compose build --no-cache
+
+build-api: ## Build only the API image (no cache)
 	docker compose build api --no-cache
 
-up: ## Start all services in background
+build-conductor: ## Build only the conductor image (no cache)
+	docker compose build conductor --no-cache
+
+up: ## Start all services (dev convenience — conductor manages lifecycle in prod)
 	docker compose up -d
+
+conductor-start: ## Production start: create containers then start conductor only
+	docker compose up --no-start
+	docker compose up -d conductor
+
+conductor-stop: ## Stop the conductor (managed stack stays up until window closes)
+	docker compose stop conductor
 
 down: ## Stop and remove all containers
 	docker compose down
 
-rebuild: down build up ## Rebuild API image and restart services
+rebuild: down build up ## Rebuild all images and restart services
 
 services-start: ## Start all microservices
 	./microservices.sh start
@@ -49,6 +62,12 @@ api-logs: ## Show logs for API service only
 alert-logs: ## Show logs for alert processor
 	./microservices.sh logs alert-processor
 
+conductor-logs: ## Show logs for conductor
+	./microservices.sh logs conductor
+
+notification-logs: ## Show logs for notification sender
+	./microservices.sh logs notification-sender
+
 services-build: ## Build all microservice images
 	./microservices.sh build
 
@@ -59,7 +78,7 @@ services-clean: ## Remove all containers and volumes (DESTRUCTIVE)
 	./microservices.sh clean
 
 ##@ Development Mode (Hot-Reload)
-dev-up: ## Start services with dev overrides (hot-reload enabled)
+dev-up: ## Start all services with dev overrides (hot-reload enabled)
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 dev-down: ## Stop dev mode services
@@ -76,6 +95,9 @@ dev-restart-api: ## Restart only API in dev mode
 dev-restart-alert: ## Restart only alert-processor in dev mode
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart alert-processor
 
+dev-restart-conductor: ## Restart only conductor in dev mode
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart conductor
+
 dev-build: ## Build images for dev mode
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml build
 
@@ -90,6 +112,9 @@ dev-logs-api: ## Show API logs in dev mode
 
 dev-logs-alert: ## Show alert-processor logs in dev mode
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f alert-processor
+
+dev-logs-conductor: ## Show conductor logs in dev mode
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f conductor
 
 dev-status: ## Show dev mode service status
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
@@ -153,12 +178,15 @@ test-geofence: ## Run only geofence/location analyzer tests
 install-shared: ## Install/update the shared package
 	./microservices.sh install-shared
 
-setup: ## Initial project setup (build, start, migrate)
+setup: ## Initial project setup — builds images, starts conductor, runs migrations
 	@echo "Setting up VTrack project..."
 	$(MAKE) build
-	$(MAKE) up
-	@echo "Waiting for services to start..."
-	@sleep 5
+	@echo "Creating containers (not started)..."
+	docker compose up --no-start
+	@echo "Starting conductor (it will bring up the managed stack)..."
+	docker compose up -d conductor
+	@echo "Waiting for conductor to start managed services..."
+	@sleep 15
 	$(MAKE) migrate
 	@echo "Setup complete! Run 'make services-status' to verify"
 

@@ -37,7 +37,8 @@ ${BLUE}VTrack Microservices Management${NC}
 Usage: ./scripts/microservices.sh [COMMAND] [OPTIONS]
 
 Commands:
-  start                 Start all services
+  start                 Start all services (dev convenience)
+  conductor-start       Production start: create containers, start conductor only
   stop                  Stop all services
   restart              Restart all services
   logs [SERVICE]       Show logs (optionally for a specific service)
@@ -47,19 +48,22 @@ Commands:
   scale-alerts         Scale alert processor (requires argument: number)
   health               Check health of all services
   install-shared       Install/update the shared package
-  queue-stats         Show Redis queue statistics
+  queue-stats          Show Redis queue statistics
   clean                Remove all containers and volumes
-  
+
 Service names:
-  - api               FastAPI application
-  - alert-processor   Alert processing microservice
-  - db                PostgreSQL database
-  - redis             Redis message queue
-  - pgadmin           PGAdmin interface
-  - migrate           Migration service
+  - conductor         Container lifecycle manager (always-on, restart: always)
+  - api               FastAPI application        (conductor-managed, restart: no)
+  - alert-processor   Alert processing           (conductor-managed, restart: no)
+  - notification-sender Telegram notifications  (conductor-managed, restart: no)
+  - db                PostgreSQL database        (conductor-managed, restart: no)
+  - redis             Redis message queue        (conductor-managed, restart: no)
+  - pgadmin           PGAdmin interface          (unmanaged admin tool)
+  - migrate           Migration service          (one-shot, run manually)
 
 Examples:
-  ./scripts/microservices.sh start
+  ./scripts/microservices.sh conductor-start
+  ./scripts/microservices.sh logs conductor
   ./scripts/microservices.sh logs api
   ./scripts/microservices.sh logs alert-processor
   ./scripts/microservices.sh scale-alerts 3
@@ -69,17 +73,28 @@ EOF
     exit 1
 }
 
-# Function to start services
+# Function to start services (dev convenience — starts everything)
 start_services() {
-    print_header "Starting VTrack Microservices"
+    print_header "Starting VTrack Microservices (dev mode)"
+    print_warning "In production use 'conductor-start' instead — conductor manages the stack lifecycle"
     docker compose up -d
     print_success "Services started"
-    
+
     # Wait for services to be ready
     print_header "Waiting for services to be healthy"
     sleep 5
-    
+
     health_check
+}
+
+# Function to start conductor only (production mode)
+conductor_start() {
+    print_header "Starting conductor (production mode)"
+    docker compose up --no-start
+    docker compose up -d conductor
+    print_success "Conductor started — it will bring up managed containers at the next window_open"
+    echo ""
+    print_warning "Follow conductor logs: ./scripts/microservices.sh logs conductor"
 }
 
 # Function to stop services
@@ -145,37 +160,51 @@ scale_alerts() {
 # Function to check health
 health_check() {
     print_header "Checking service health"
-    
+
+    # Check Conductor (always-on)
+    if docker ps --filter "name=conductor" --filter "status=running" | grep -q conductor; then
+        print_success "Conductor is running"
+    else
+        print_error "Conductor is not running (start with: docker compose up -d conductor)"
+    fi
+
     # Check PostgreSQL
     if docker exec postgres_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "SELECT 1" > /dev/null 2>&1; then
         print_success "PostgreSQL is healthy"
     else
-        print_error "PostgreSQL is not responding"
+        print_warning "PostgreSQL is not responding (conductor will start it at next window_open)"
     fi
-    
+
     # Check Redis
     if docker exec redis_queue redis-cli ping > /dev/null 2>&1; then
         print_success "Redis is healthy"
     else
-        print_error "Redis is not responding"
+        print_warning "Redis is not responding (conductor will start it at next window_open)"
     fi
-    
+
     # Check API
-    if curl -s http://localhost:8000/collect/status > /dev/null 2>&1; then
+    if curl -s http://localhost:8000/monitor/health > /dev/null 2>&1; then
         print_success "FastAPI is responding"
     else
-        print_error "FastAPI is not responding"
+        print_warning "FastAPI is not responding (conductor will start it at next window_open)"
     fi
-    
+
     # Check Alert Processor
-    if docker ps | grep -q alert_processor; then
+    if docker ps --filter "name=alert_processor" --filter "status=running" | grep -q alert_processor; then
         if docker exec alert_processor pgrep -f "main.py" > /dev/null 2>&1; then
             print_success "Alert Processor is running"
         else
-            print_error "Alert Processor process not found"
+            print_error "Alert Processor process not found inside container"
         fi
     else
-        print_error "Alert Processor container not found"
+        print_warning "Alert Processor is not running (conductor will start it at next window_open)"
+    fi
+
+    # Check Notification Sender
+    if docker ps --filter "name=notification_sender" --filter "status=running" | grep -q notification_sender; then
+        print_success "Notification Sender is running"
+    else
+        print_warning "Notification Sender is not running (conductor will start it at next window_open)"
     fi
 }
 
@@ -236,6 +265,9 @@ clean_system() {
 case "$1" in
     start)
         start_services
+        ;;
+    conductor-start)
+        conductor_start
         ;;
     stop)
         stop_services
