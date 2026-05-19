@@ -1,6 +1,6 @@
 """Tests for Conductor orchestration logic — mocks both gateways."""
 import asyncio
-from datetime import time, datetime
+from datetime import time, datetime as _real_datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -15,6 +15,15 @@ MANAGED = ["api", "db", "redis"]
 
 _MORNING = SlotConfig(window_open=time(5, 0), window_close=time(6, 40))
 _AFTERNOON = SlotConfig(window_open=time(14, 30), window_close=time(16, 30))
+
+
+def _freeze(frozen: _real_datetime):
+    """Return a context-manager that patches conductor.conductor.datetime.now()
+    while keeping datetime.combine (and other methods) functional."""
+    mock = MagicMock(wraps=_real_datetime)
+    mock.now.return_value = frozen
+    mock.combine = _real_datetime.combine
+    return patch("conductor.conductor.datetime", mock)
 SLOTS = {"morning": _MORNING, "afternoon": _AFTERNOON}
 
 
@@ -40,6 +49,8 @@ def _make_containers(*, running=False):
 
 
 def _conductor(gateway=None, containers=None, **kwargs):
+    kwargs.setdefault("health_timeout", 0)
+    kwargs.setdefault("health_poll_interval", 0)
     return Conductor(
         gateway=gateway or _make_gateway(),
         containers=containers or _make_containers(),
@@ -57,10 +68,8 @@ class TestBootSequence:
         containers = _make_containers(running=True)
         conductor = _conductor(containers=containers)
 
-        # Freeze clock to a time clearly outside both windows (e.g. 10:00)
-        frozen = datetime(2026, 5, 19, 10, 0, tzinfo=TZ)
-        with patch("conductor.conductor.datetime") as mock_dt:
-            mock_dt.now.return_value = frozen
+        frozen = _real_datetime(2026, 5, 19, 10, 0, tzinfo=TZ)
+        with _freeze(frozen):
             await conductor.run_boot_sequence()
 
         assert containers.stop.call_count == len(MANAGED)
@@ -71,10 +80,8 @@ class TestBootSequence:
         gateway = _make_gateway(healthy=True)
         conductor = _conductor(gateway=gateway, containers=containers)
 
-        # 05:20 — inside morning window
-        frozen = datetime(2026, 5, 19, 5, 20, tzinfo=TZ)
-        with patch("conductor.conductor.datetime") as mock_dt:
-            mock_dt.now.return_value = frozen
+        frozen = _real_datetime(2026, 5, 19, 5, 20, tzinfo=TZ)
+        with _freeze(frozen):
             await conductor.run_boot_sequence()
 
         containers.start.assert_called()
@@ -89,9 +96,8 @@ class TestBootSequence:
         gateway = _make_gateway(guardian=guardian)
         conductor = _conductor(gateway=gateway)
 
-        frozen = datetime(2026, 5, 19, 5, 20, tzinfo=TZ)
-        with patch("conductor.conductor.datetime") as mock_dt:
-            mock_dt.now.return_value = frozen
+        frozen = _real_datetime(2026, 5, 19, 5, 20, tzinfo=TZ)
+        with _freeze(frozen):
             await conductor.run_boot_sequence()
 
         gateway.activate_guardian.assert_not_called()
@@ -102,9 +108,8 @@ class TestBootSequence:
         containers = _make_containers(running=False)
         conductor = _conductor(gateway=gateway, containers=containers)
 
-        frozen = datetime(2026, 5, 19, 5, 20, tzinfo=TZ)
-        with patch("conductor.conductor.datetime") as mock_dt:
-            mock_dt.now.return_value = frozen
+        frozen = _real_datetime(2026, 5, 19, 5, 20, tzinfo=TZ)
+        with _freeze(frozen):
             await conductor.run_boot_sequence()
 
         containers.start.assert_called()
