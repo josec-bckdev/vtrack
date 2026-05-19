@@ -21,12 +21,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import RequestError, HTTPStatusError
 
-from app.scraper_async import (
-    AsyncCollectionManager,
-    parse_remote_datetime,
-    normalize_route_data,
-    COLLECTION_INTERVAL_SECONDS,
-)
+from app.scraper_async import AsyncCollectionManager, COLLECTION_INTERVAL_SECONDS
+from app.domain.scraper import parse_remote_datetime, normalize_route_data
 from app.models import (
     RouteDataEntry,
     CollectionMetadata,
@@ -350,7 +346,7 @@ class TestCollectionStateMachine:
 
         # Act
         fixed_dt = datetime(2025, 1, 15, 12, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
-        with patch("app.scraper_async.datetime") as mock_datetime:
+        with patch("app.domain.scraper.datetime") as mock_datetime:
             mock_datetime.now.return_value = fixed_dt
             should_start = manager._should_start_collection(normalized_data)
 
@@ -792,7 +788,7 @@ class TestShouldStopCollection:
         """WHY: "Bajo" in the afternoon signals route complete."""
         manager = clean_collection_manager
         fixed = datetime(2025, 1, 15, 16, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
-        with patch("app.scraper_async.datetime") as mock_dt:
+        with patch("app.domain.scraper.datetime") as mock_dt:
             mock_dt.now.return_value = fixed
             result = manager._should_stop_collection({'student_status': 'Bajo'})
         assert result is True
@@ -801,7 +797,7 @@ class TestShouldStopCollection:
         """WHY: "Subio" in the morning means student is onboard — stop tracking."""
         manager = clean_collection_manager
         fixed = datetime(2025, 1, 15, 7, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
-        with patch("app.scraper_async.datetime") as mock_dt:
+        with patch("app.domain.scraper.datetime") as mock_dt:
             mock_dt.now.return_value = fixed
             result = manager._should_stop_collection({'student_status': 'Subio'})
         assert result is True
@@ -810,7 +806,7 @@ class TestShouldStopCollection:
         """WHY: "Bajo" in the morning should not stop the morning run."""
         manager = clean_collection_manager
         fixed = datetime(2025, 1, 15, 7, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
-        with patch("app.scraper_async.datetime") as mock_dt:
+        with patch("app.domain.scraper.datetime") as mock_dt:
             mock_dt.now.return_value = fixed
             result = manager._should_stop_collection({'student_status': 'Bajo'})
         assert result is False
