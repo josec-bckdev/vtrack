@@ -34,6 +34,10 @@ class Scheduler:
         self.scheduled_times_label: str = "not started"
         self._collection_status_adapter: object | None = None
         self._schedule_config: ScheduleConfig | None = None
+        self._guardian_outcomes: dict = {
+            "morning":   {"last_outcome": None, "completed_at": None},
+            "afternoon": {"last_outcome": None, "completed_at": None},
+        }
 
     def set_collection_manager(self, manager):
         self.collection_manager = manager
@@ -147,9 +151,23 @@ class Scheduler:
             return task is not None and not task.done()
 
         return {
-            "morning": {"task_running": _task_running(self.morning_guardian_task)},
-            "afternoon": {"task_running": _task_running(self.afternoon_guardian_task)},
+            "morning": {
+                "task_running": _task_running(self.morning_guardian_task),
+                **self._guardian_outcomes["morning"],
+            },
+            "afternoon": {
+                "task_running": _task_running(self.afternoon_guardian_task),
+                **self._guardian_outcomes["afternoon"],
+            },
         }
+
+    async def _run_and_record(self, slot_name: str, slot: JobSlot, adapter) -> GuardianState:
+        outcome = await self._watch_slot(slot, adapter)
+        self._guardian_outcomes[slot_name] = {
+            "last_outcome": outcome.value,
+            "completed_at": datetime.now(ZoneInfo("America/Bogota")).isoformat(),
+        }
+        return outcome
 
     async def activate_guardian(self, slot_name: str, adapter) -> None:
         if self._schedule_config is None:
@@ -160,14 +178,14 @@ class Scheduler:
                 raise RuntimeError("morning guardian already active")
             slot = self._schedule_config.collection_morning
             self.morning_guardian_task = asyncio.create_task(
-                self._watch_slot(slot, adapter)
+                self._run_and_record("morning", slot, adapter)
             )
         elif slot_name == "afternoon":
             if self.afternoon_guardian_task and not self.afternoon_guardian_task.done():
                 raise RuntimeError("afternoon guardian already active")
             slot = self._schedule_config.collection_afternoon
             self.afternoon_guardian_task = asyncio.create_task(
-                self._watch_slot(slot, adapter)
+                self._run_and_record("afternoon", slot, adapter)
             )
         else:
             raise ValueError(f"Unknown slot: {slot_name!r}. Valid values: morning, afternoon")
