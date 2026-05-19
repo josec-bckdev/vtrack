@@ -20,7 +20,7 @@ from app.domain.scraper import (
     should_start_collection,
     should_stop_collection,
 )
-from app.domain.ports import IRouteDataRepository
+from app.domain.ports import ICollectionStateStore, IRouteDataRepository
 from shared.message_queue import MessageQueue
 
 # Setup logging
@@ -51,16 +51,11 @@ class AsyncCollectionManager:
         self,
         message_queue: Optional[MessageQueue] = None,
         repository: Optional[IRouteDataRepository] = None,
+        state_store: Optional[ICollectionStateStore] = None,
     ):
         self._task: asyncio.Task | None = None
         self._is_running = False
-        self._status: CollectionStatusEnum = CollectionStatusEnum.IDLE
         self._lock = asyncio.Lock()
-        self.current_task_id: int | None = None
-        self.last_data_hash: str | None = None
-        self.datapoints_collected: int = 0
-        self.start_time: datetime | None = None
-        self.stop_time: datetime | None = None
         self.message_queue: Optional[MessageQueue] = message_queue
 
         # Session management
@@ -71,11 +66,44 @@ class AsyncCollectionManager:
         # Persistent httpx client to maintain session and connection pooling
         self._client: Optional[httpx.AsyncClient] = None
 
-        # Lazy import avoids circular dependency at module load time
+        # Lazy imports avoid circular dependencies at module load time
         if repository is None:
             from app.adapters.route_repository import SqlAlchemyRouteRepository
             repository = SqlAlchemyRouteRepository()
         self._repository: IRouteDataRepository = repository
+
+        if state_store is None:
+            from app.adapters.collection_state import InMemoryCollectionState
+            state_store = InMemoryCollectionState()
+        self._state: ICollectionStateStore = state_store
+
+    # ------------------------------------------------------------------
+    # State properties — delegate to the state store for single source of truth
+    # ------------------------------------------------------------------
+
+    @property
+    def _status(self) -> CollectionStatusEnum:
+        return self._state.get_snapshot().status
+
+    @_status.setter
+    def _status(self, value: CollectionStatusEnum) -> None:
+        self._state.set_status(value)
+
+    @property
+    def current_task_id(self) -> Optional[int]:
+        return self._state.get_snapshot().task_id
+
+    @property
+    def datapoints_collected(self) -> int:
+        return self._state.get_snapshot().datapoints_collected
+
+    @property
+    def start_time(self) -> Optional[datetime]:
+        return self._state.get_snapshot().start_time
+
+    @property
+    def stop_time(self) -> Optional[datetime]:
+        return self._state.get_snapshot().stop_time
 
     def _is_session_valid(self) -> bool:
         if not self._last_login_time or not self._session_cookies:
@@ -212,16 +240,14 @@ class AsyncCollectionManager:
             raise
 
     async def _set_status_async(self, status: CollectionStatusEnum):
-        self._status = status
         update_time = datetime.now(ZoneInfo("America/Bogota"))
         stop_time = None
         if status in [CollectionStatusEnum.IDLE, CollectionStatusEnum.FINISHED]:
             stop_time = update_time
-            self.stop_time = stop_time
-        if self.current_task_id is not None:
-            self._repository.update_task_status(
-                self.current_task_id, status, update_time, stop_time
-            )
+        self._state.set_status(status, stop_time)
+        task_id = self._state.get_snapshot().task_id
+        if task_id is not None:
+            self._repository.update_task_status(task_id, status, update_time, stop_time)
 
     def _should_start_collection(self, normalized_data: dict) -> bool:
         return should_start_collection(normalized_data)
@@ -239,19 +265,14 @@ class AsyncCollectionManager:
                 normalized_data.get("student_status"),
             ]
         )
-
-        if self.last_data_hash != current_hash:
-            self.last_data_hash = current_hash
-            return True
-        return False
+        return self._state.check_and_update_hash(current_hash)
 
     async def _save_route_data_async(self, normalized_data: dict):
         self._repository.save_route_entry(normalized_data)
-        self.datapoints_collected += 1
-        if self.current_task_id is not None:
-            self._repository.update_task_datapoints(
-                self.current_task_id, self.datapoints_collected
-            )
+        count = self._state.increment_datapoints()
+        task_id = self._state.get_snapshot().task_id
+        if task_id is not None:
+            self._repository.update_task_datapoints(task_id, count)
         logger.info(f"Saved route data for ruta {normalized_data['ruta']}")
 
         if self.message_queue:
@@ -313,11 +334,8 @@ class AsyncCollectionManager:
 
     async def _initialize_metadata_async(self):
         start_time = datetime.now(ZoneInfo("America/Bogota"))
-        self.current_task_id = self._repository.create_task(start_time)
-        self.datapoints_collected = 0
-        self.start_time = start_time
-        self.stop_time = None
-        self.last_data_hash = None
+        task_id = self._repository.create_task(start_time)
+        self._state.initialize(task_id, start_time)
 
     async def start(self) -> Literal[True]:
         async with self._lock:
@@ -362,7 +380,8 @@ class AsyncCollectionManager:
 
     async def get_status(self):
         """Returns the current status and metadata of the collection task."""
-        if self.current_task_id is None:
+        snap = self._state.get_snapshot()
+        if snap.task_id is None:
             return CollectionStatusResponse(
                 status=CollectionStatusEnum.IDLE, message="No active collection task"
             )
@@ -372,12 +391,12 @@ class AsyncCollectionManager:
         )
 
         return CollectionStatusResponse(
-            task_id=self.current_task_id,
-            status=self._status,
-            message=f"Collection {self._status.value}. {session_status}",
-            start_time=self.start_time,
-            stop_time=self.stop_time,
-            datapoints_collected=self.datapoints_collected,
+            task_id=snap.task_id,
+            status=snap.status,
+            message=f"Collection {snap.status.value}. {session_status}",
+            start_time=snap.start_time,
+            stop_time=snap.stop_time,
+            datapoints_collected=snap.datapoints_collected,
         )
 
     async def wait_for_completion(self):

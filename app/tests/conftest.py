@@ -312,18 +312,14 @@ def clean_collection_manager():
     """
     from unittest.mock import MagicMock
     from app.domain.ports import IRouteDataRepository
+    from app.adapters.collection_state import InMemoryCollectionState
 
     mock_repo = MagicMock(spec=IRouteDataRepository)
     mock_repo.create_task.return_value = 1
 
-    manager = AsyncCollectionManager(repository=mock_repo)
+    manager = AsyncCollectionManager(repository=mock_repo, state_store=InMemoryCollectionState())
     manager._task = None
     manager._is_running = False
-    manager.current_task_id = None
-    manager.last_data_hash = None
-    manager.datapoints_collected = 0
-    manager.start_time = None
-    manager.stop_time = None
     manager._last_login_time = None
     manager._session_cookies = None
 
@@ -339,16 +335,12 @@ def collection_manager_with_db(db_session):
     For all other manager tests, prefer clean_collection_manager.
     """
     from app.adapters.route_repository import SqlAlchemyRouteRepository
+    from app.adapters.collection_state import InMemoryCollectionState
 
     repo = SqlAlchemyRouteRepository(get_session=lambda: db_session)
-    manager = AsyncCollectionManager(repository=repo)
+    manager = AsyncCollectionManager(repository=repo, state_store=InMemoryCollectionState())
     manager._task = None
     manager._is_running = False
-    manager.current_task_id = None
-    manager.last_data_hash = None
-    manager.datapoints_collected = 0
-    manager.start_time = None
-    manager.stop_time = None
     manager._last_login_time = None
     manager._session_cookies = None
 

@@ -14,7 +14,7 @@ These are INTEGRATION tests - they test the full request/response cycle.
 import pytest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, PropertyMock
 
 from fastapi import status
 
@@ -76,8 +76,9 @@ class TestCollectionControlEndpoints:
         ASSERT: Returns 400 error
         """
         # Arrange
+        from app.scraper_async import AsyncCollectionManager
         with patch('app.main.collection_manager._is_running', True):
-            with patch('app.main.collection_manager._status', CollectionStatusEnum.ONGOING):
+            with patch.object(AsyncCollectionManager, '_status', new_callable=PropertyMock, return_value=CollectionStatusEnum.ONGOING):
                 # Act
                 response = test_client.post("/collect/start")
 
