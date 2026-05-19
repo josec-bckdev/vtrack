@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from opentelemetry import trace
+from tracing import configure_tracing
 from shared.message_queue import MessageQueue
 from shared.location_alerts import LocationAnalyzer, LocationAlert
 
@@ -183,6 +184,11 @@ class AlertConsumer:
 
 def main():
     """Main entry point for the alert consumer service."""
+    otlp_endpoint = os.getenv("OTLP_ENDPOINT", "")
+    if otlp_endpoint:
+        configure_tracing("alert-processor", otlp_endpoint)
+        logger.info("OTel tracing configured — exporting to %s", otlp_endpoint)
+
     consumer = AlertConsumer()
     
     # Start processing with 1-second poll interval
