@@ -20,8 +20,11 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from opentelemetry import trace
 from shared.message_queue import MessageQueue
 from shared.location_alerts import LocationAnalyzer, LocationAlert
+
+_tracer = trace.get_tracer(__name__)
 
 POLL_INTERVAL_SECONDS = 7  # Time to wait between queue checks
 
@@ -83,67 +86,73 @@ class AlertConsumer:
     def _process_coordinate_queue(self):
         """Process all available coordinates in the queue."""
         coordinate = self.message_queue.pop_coordinate()
-        
+
         if coordinate:
             try:
-                # Extract coordinate data
                 ruta = coordinate.get('ruta')
                 latitude = coordinate.get('latitude')
                 longitude = coordinate.get('longitude')
-                
+
                 if not all([ruta, latitude, longitude]):
                     logger.warning(f"Invalid coordinate data: {coordinate}")
                     return
-                
-                # Analyze the coordinate
-                alerts = self.location_analyzer.analyze_coordinate(
-                    ruta=ruta,
-                    latitude=latitude,
-                    longitude=longitude
-                )
-                
-                self.processed_count += 1
-                
-                # Queue any generated alerts
-                for alert in alerts:
-                    self._queue_alert(alert)
-                    self.alert_count += 1
-                
-                # Log statistics periodically
-                if self.processed_count % 100 == 0:
-                    logger.info(
-                        f"Processed {self.processed_count} coordinates, "
-                        f"Generated {self.alert_count} alerts"
+
+                with _tracer.start_as_current_span("alert_processor.coordinate.process") as span:
+                    span.set_attribute("coordinate.ruta", ruta)
+                    span.set_attribute("coordinate.latitude", latitude)
+                    span.set_attribute("coordinate.longitude", longitude)
+
+                    alerts = self.location_analyzer.analyze_coordinate(
+                        ruta=ruta,
+                        latitude=latitude,
+                        longitude=longitude
                     )
-                    
+
+                    span.set_attribute("alerts.generated", len(alerts))
+                    self.processed_count += 1
+
+                    for alert in alerts:
+                        self._queue_alert(alert)
+                        self.alert_count += 1
+
+                    if self.processed_count % 100 == 0:
+                        logger.info(
+                            f"Processed {self.processed_count} coordinates, "
+                            f"Generated {self.alert_count} alerts"
+                        )
+
             except Exception as e:
                 logger.error(f"Error processing coordinate: {e}")
     
     def _queue_alert(self, alert: LocationAlert):
         """
         Queue a generated alert to the alert queue.
-        
+
         Args:
             alert: LocationAlert object
         """
         try:
-            success = self.message_queue.push_alert(
-                ruta=alert.ruta,
-                latitude=alert.latitude,
-                longitude=alert.longitude,
-                alert_type=alert.alert_type.value,
-                area_name=alert.zone_name,
-                severity=alert.severity.value
-            )
-            
-            if success:
-                logger.warning(
-                    f"[ALERT] Route {alert.ruta}: {alert.alert_type.value} "
-                    f"in {alert.zone_name} - Severity: {alert.severity.value}"
+            with _tracer.start_as_current_span("alert_processor.alert.queue") as span:
+                span.set_attribute("alert.type", alert.alert_type.value)
+                span.set_attribute("alert.zone", alert.zone_name)
+
+                success = self.message_queue.push_alert(
+                    ruta=alert.ruta,
+                    latitude=alert.latitude,
+                    longitude=alert.longitude,
+                    alert_type=alert.alert_type.value,
+                    area_name=alert.zone_name,
+                    severity=alert.severity.value
                 )
-            else:
-                logger.error(f"Failed to queue alert for route {alert.ruta}")
-                
+
+                if success:
+                    logger.warning(
+                        f"[ALERT] Route {alert.ruta}: {alert.alert_type.value} "
+                        f"in {alert.zone_name} - Severity: {alert.severity.value}"
+                    )
+                else:
+                    logger.error(f"Failed to queue alert for route {alert.ruta}")
+
         except Exception as e:
             logger.error(f"Error queuing alert: {e}")
     
