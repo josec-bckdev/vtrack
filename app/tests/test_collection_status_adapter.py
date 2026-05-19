@@ -9,6 +9,7 @@ Section 2: Adapter behaviour — AsyncCollectionManagerAdapter correctly
 """
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # =============================================================================
@@ -70,3 +71,48 @@ class TestCollectionStatusAdapterPortContract:
 
         adapter = ConcreteAdapter()
         assert adapter is not None
+
+
+# =============================================================================
+# ADAPTER BEHAVIOUR TESTS  (RED until app/adapters/collection_status_adapter.py exists)
+# =============================================================================
+
+class TestAsyncCollectionManagerAdapter:
+
+    def test_adapter_is_importable(self):
+        from app.adapters.collection_status_adapter import AsyncCollectionManagerAdapter
+        assert AsyncCollectionManagerAdapter is not None
+
+    def test_adapter_implements_port(self):
+        from app.adapters.collection_status_adapter import AsyncCollectionManagerAdapter
+        from app.domain.ports import ICollectionStatusAdapter
+        assert issubclass(AsyncCollectionManagerAdapter, ICollectionStatusAdapter)
+
+    def test_is_running_returns_false_when_manager_not_running(self, clean_collection_manager):
+        from app.adapters.collection_status_adapter import AsyncCollectionManagerAdapter
+        clean_collection_manager._is_running = False
+        adapter = AsyncCollectionManagerAdapter(clean_collection_manager)
+        assert adapter.is_running() is False
+
+    def test_is_running_returns_true_when_manager_running(self, clean_collection_manager):
+        from app.adapters.collection_status_adapter import AsyncCollectionManagerAdapter
+        clean_collection_manager._is_running = True
+        adapter = AsyncCollectionManagerAdapter(clean_collection_manager)
+        assert adapter.is_running() is True
+
+    @pytest.mark.asyncio
+    async def test_start_delegates_to_manager(self, clean_collection_manager):
+        from app.adapters.collection_status_adapter import AsyncCollectionManagerAdapter
+        clean_collection_manager.start = AsyncMock(return_value=True)
+        adapter = AsyncCollectionManagerAdapter(clean_collection_manager)
+        await adapter.start()
+        clean_collection_manager.start.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_start_raises_if_manager_already_running(self, clean_collection_manager):
+        from app.adapters.collection_status_adapter import AsyncCollectionManagerAdapter
+        clean_collection_manager._is_running = True
+        clean_collection_manager.start = AsyncMock(side_effect=RuntimeError("Collection already running"))
+        adapter = AsyncCollectionManagerAdapter(clean_collection_manager)
+        with pytest.raises(RuntimeError, match="already running"):
+            await adapter.start()
