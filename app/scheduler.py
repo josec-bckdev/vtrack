@@ -27,9 +27,13 @@ class Scheduler:
         self.afternoon_task: asyncio.Task | None = None
         self.cookie_morning_task: asyncio.Task | None = None
         self.cookie_afternoon_task: asyncio.Task | None = None
+        self.morning_guardian_task: asyncio.Task | None = None
+        self.afternoon_guardian_task: asyncio.Task | None = None
         self.is_running = False
         self.collection_manager = None
         self.scheduled_times_label: str = "not started"
+        self._collection_status_adapter: object | None = None
+        self._schedule_config: ScheduleConfig | None = None
 
     def set_collection_manager(self, manager):
         self.collection_manager = manager
@@ -50,6 +54,7 @@ class Scheduler:
             schedule_config = load_schedule_config(_default_path)
 
         self.is_running = True
+        self._schedule_config = schedule_config
         morning_fire = schedule_config.collection_morning.fire_time
         afternoon_fire = schedule_config.collection_afternoon.fire_time
         self.scheduled_times_label = (
@@ -136,6 +141,36 @@ class Scheduler:
                     await run_refresh(self.collection_manager)
                 except Exception as exc:
                     logger.error("Proactive cookie refresh (%s) failed: %s", label, exc)
+
+    def get_guardian_status(self) -> dict:
+        def _task_running(task: asyncio.Task | None) -> bool:
+            return task is not None and not task.done()
+
+        return {
+            "morning": {"task_running": _task_running(self.morning_guardian_task)},
+            "afternoon": {"task_running": _task_running(self.afternoon_guardian_task)},
+        }
+
+    async def activate_guardian(self, slot_name: str, adapter) -> None:
+        if self._schedule_config is None:
+            raise RuntimeError("Scheduler has no schedule config — call start_scheduler first")
+
+        if slot_name == "morning":
+            if self.morning_guardian_task and not self.morning_guardian_task.done():
+                raise RuntimeError("morning guardian already active")
+            slot = self._schedule_config.collection_morning
+            self.morning_guardian_task = asyncio.create_task(
+                self._watch_slot(slot, adapter)
+            )
+        elif slot_name == "afternoon":
+            if self.afternoon_guardian_task and not self.afternoon_guardian_task.done():
+                raise RuntimeError("afternoon guardian already active")
+            slot = self._schedule_config.collection_afternoon
+            self.afternoon_guardian_task = asyncio.create_task(
+                self._watch_slot(slot, adapter)
+            )
+        else:
+            raise ValueError(f"Unknown slot: {slot_name!r}. Valid values: morning, afternoon")
 
     async def _watch_slot(self, slot: JobSlot, adapter) -> GuardianState:
         """Guardian coroutine: watches one slot and ensures the collection fires."""

@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
     
     schedule_config = load_schedule_config(_DEFAULT_SCHEDULE_PATH)
     scheduler.set_collection_manager(collection_manager)
+    from app.adapters.collection_status_adapter import AsyncCollectionManagerAdapter
+    scheduler._collection_status_adapter = AsyncCollectionManagerAdapter(collection_manager)
     await scheduler.start_scheduler(schedule_config=schedule_config)
     logger.info("FastAPI application startup complete - scheduler running")
     
@@ -251,6 +253,27 @@ async def get_scheduler_status():
         "scheduled_times": scheduler.scheduled_times_label,
         "timezone": "America/Bogota"
     }
+
+@app.get("/guardian/status")
+async def get_guardian_status():
+    """Per-slot guardian state — whether each watch-slot task is active."""
+    return scheduler.get_guardian_status()
+
+
+@app.post("/guardian/activate")
+async def activate_guardian(slot: str):
+    """
+    Start a guardian task for a given slot (morning | afternoon).
+    Intended for Conductor to trigger after a late boot.
+    """
+    if slot not in ("morning", "afternoon"):
+        raise HTTPException(status_code=400, detail=f"Invalid slot {slot!r}. Use 'morning' or 'afternoon'.")
+    try:
+        await scheduler.activate_guardian(slot, scheduler._collection_status_adapter)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"slot": slot, "activated": True}
+
 
 @app.post("/session/refresh")
 async def trigger_cookie_refresh():
