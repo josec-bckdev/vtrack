@@ -4,10 +4,13 @@ from datetime import datetime, time, timedelta
 from enum import Enum
 from zoneinfo import ZoneInfo
 
+from opentelemetry import trace
+
 from app.config import JobSlot, ScheduleConfig, load_schedule_config
 from app.cookie_refresh import run_refresh
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 GUARDIAN_POLL_INTERVAL = 30  # seconds
 
@@ -211,41 +214,49 @@ class Scheduler:
         grace_dt = fire_dt + timedelta(minutes=slot.grace_minutes)
         window_close_dt = datetime.combine(today, slot.window_close).replace(tzinfo=tz)
 
-        _set(GuardianState.IDLE)
+        span_name = f"guardian.slot.{slot_name}" if slot_name else "guardian.slot"
+        with _tracer.start_as_current_span(span_name) as slot_span:
+            slot_span.set_attribute("slot.name", slot_name or "unknown")
+            _set(GuardianState.IDLE)
 
-        # Already past window_close — nothing to do
-        if now >= window_close_dt:
-            _set(GuardianState.MISSED)
-            logger.warning("Guardian: slot missed — woke after window_close (%s)", slot.window_close)
-            return GuardianState.MISSED
-
-        # Sleep until window opens
-        if now < window_open_dt:
-            wait = (window_open_dt - now).total_seconds()
-            await asyncio.sleep(wait)
-
-        # Watching loop — poll until a terminal state
-        _set(GuardianState.WATCHING)
-        while True:
-            now = datetime.now(tz)
-
+            # Already past window_close — nothing to do
             if now >= window_close_dt:
                 _set(GuardianState.MISSED)
-                logger.warning("Guardian: slot missed — window closed with no collection started")
+                logger.warning("Guardian: slot missed — woke after window_close (%s)", slot.window_close)
                 return GuardianState.MISSED
 
-            if adapter.is_running():
-                _set(GuardianState.STARTED)
-                logger.info("Guardian: collection already running — slot covered")
-                return GuardianState.STARTED
+            # Sleep until window opens
+            if now < window_open_dt:
+                wait = (window_open_dt - now).total_seconds()
+                await asyncio.sleep(wait)
 
-            if now >= grace_dt:
-                logger.info("Guardian: past fire+grace, starting collection")
-                await adapter.start()
-                _set(GuardianState.STARTED)
-                return GuardianState.STARTED
+            # Watching loop — poll until a terminal state
+            _set(GuardianState.WATCHING)
+            with _tracer.start_as_current_span("guardian.watching"):
+                while True:
+                    now = datetime.now(tz)
 
-            await asyncio.sleep(GUARDIAN_POLL_INTERVAL)
+                    if now >= window_close_dt:
+                        _set(GuardianState.MISSED)
+                        logger.warning("Guardian: slot missed — window closed with no collection started")
+                        return GuardianState.MISSED
+
+                    if adapter.is_running():
+                        _set(GuardianState.STARTED)
+                        logger.info("Guardian: collection already running — slot covered")
+                        with _tracer.start_as_current_span("guardian.collection.start") as s:
+                            s.set_attribute("trigger", "already_running")
+                        return GuardianState.STARTED
+
+                    if now >= grace_dt:
+                        logger.info("Guardian: past fire+grace, starting collection")
+                        with _tracer.start_as_current_span("guardian.collection.start") as s:
+                            s.set_attribute("trigger", "grace_exceeded")
+                            await adapter.start()
+                        _set(GuardianState.STARTED)
+                        return GuardianState.STARTED
+
+                    await asyncio.sleep(GUARDIAN_POLL_INTERVAL)
 
     async def _start_collection_if_not_running(self, schedule_type: str):
         try:
