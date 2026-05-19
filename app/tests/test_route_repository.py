@@ -121,7 +121,8 @@ class TestSqlAlchemyRouteRepositoryCreateTask:
         now = datetime(2025, 6, 1, 7, 0, 0, tzinfo=ZoneInfo("America/Bogota"))
         repo.create_task(now)
         row = db_session.query(CollectionMetadata).first()
-        assert row.start_time == now
+        # SQLite drops tz info; compare naive values
+        assert row.start_time == now.replace(tzinfo=None)
 
 
 class TestSqlAlchemyRouteRepositoryUpdateTaskStatus:
@@ -147,7 +148,8 @@ class TestSqlAlchemyRouteRepositoryUpdateTaskStatus:
 
         db_session.expire_all()
         row = db_session.query(CollectionMetadata).get(task_id)
-        assert row.stop_time == stop
+        # SQLite drops tz info; compare naive values
+        assert row.stop_time == stop.replace(tzinfo=None)
 
     def test_stop_time_not_set_when_none(self, repo, db_session):
         from app.models import CollectionMetadata
