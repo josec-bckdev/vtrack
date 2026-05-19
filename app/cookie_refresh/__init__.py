@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from opentelemetry import trace
+
 from app.cookie_refresh.adapters.script_store import FileProgrammedScriptStore
 from app.cookie_refresh.adapters.vnc_browser import VncBrowserGateway
 from app.cookie_refresh.adapters.direct_vtrack import DirectVtrackGateway
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
     from app.scraper_async import AsyncCollectionManager
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 _LOGIN_URL = "https://www.rutasljrj.net/rastreo/ljrj/login"
 
@@ -50,7 +53,11 @@ async def run_refresh(collection_manager: "AsyncCollectionManager") -> bool:
         login_password=s.login_password,
     )
 
-    result = await use_case.execute()
+    with _tracer.start_as_current_span("cookie_refresh.run") as span:
+        result = await use_case.execute()
+        span.set_attribute("refresh.success", result.success)
+        span.set_attribute("refresh.steps_taken", result.steps_taken)
+
     if result.success:
         logger.info("Cookie refresh succeeded in %d steps", result.steps_taken)
     else:
