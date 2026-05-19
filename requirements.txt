@@ -30,5 +30,11 @@ fakeredis>=2.19.0
 # Cookie refresh (VNC browser automation)
 docker
 
+# OpenTelemetry
+opentelemetry-api==1.25.0
+opentelemetry-sdk==1.25.0
+opentelemetry-exporter-otlp-proto-grpc==1.25.0
+opentelemetry-instrumentation-fastapi==0.46b0
+
 # Development
 debugpy
