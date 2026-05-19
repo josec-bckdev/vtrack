@@ -8,12 +8,6 @@ Fails until app/scraper_async.py is instrumented.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import opentelemetry.trace as trace_api
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-
 from app.adapters.collection_state import InMemoryCollectionState
 from app.domain.ports import IRouteDataRepository
 from app.scraper_async import AsyncCollectionManager
@@ -28,21 +22,9 @@ def _make_manager() -> AsyncCollectionManager:
     )
 
 
-@pytest.fixture(scope="session")
-def _collection_provider():
-    exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace_api._TRACER_PROVIDER = None
-    trace_api._TRACER_PROVIDER_SET_ONCE._done = False
-    trace.set_tracer_provider(provider)
-    return exporter
-
-
 @pytest.fixture(autouse=True)
-def span_exporter(_collection_provider):
-    _collection_provider.clear()
-    yield _collection_provider
+def span_exporter(span_exporter):  # noqa: F811 — shadows conftest fixture intentionally
+    yield span_exporter
 
 
 class TestCollectionRunSpan:

@@ -20,12 +20,15 @@ from app.domain.scraper import (
     should_start_collection,
     should_stop_collection,
 )
+from opentelemetry import trace
+
 from app.domain.ports import ICollectionStateStore, IRouteDataRepository
 from shared.message_queue import MessageQueue
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 # Configuration
 VALORES_URL = (
@@ -65,6 +68,10 @@ class AsyncCollectionManager:
 
         # Persistent httpx client to maintain session and connection pooling
         self._client: Optional[httpx.AsyncClient] = None
+
+        # OTel: span kept open for the lifetime of a collection run
+        self._collection_span: Optional[trace.Span] = None
+        self._collection_start_time: Optional[datetime] = None
 
         # Lazy imports avoid circular dependencies at module load time
         if repository is None:
@@ -345,6 +352,10 @@ class AsyncCollectionManager:
             await self._initialize_metadata_async()
             self._is_running = True
 
+        self._collection_span = _tracer.start_span("collection.run")
+        self._collection_span.set_attribute("collection.task_id", self.current_task_id)
+        self._collection_start_time = datetime.now(ZoneInfo("America/Bogota"))
+
         await self._set_status_async(CollectionStatusEnum.IDLE)
         self._task = asyncio.create_task(self._collection_loop())
 
@@ -362,6 +373,16 @@ class AsyncCollectionManager:
                 self._task = None
 
         await self._set_status_async(CollectionStatusEnum.FINISHED)
+
+        if self._collection_span is not None:
+            duration = (
+                datetime.now(ZoneInfo("America/Bogota")) - self._collection_start_time
+            ).total_seconds()
+            self._collection_span.set_attribute("collection.datapoints", self.datapoints_collected)
+            self._collection_span.set_attribute("collection.duration_s", round(duration, 1))
+            self._collection_span.end()
+            self._collection_span = None
+            self._collection_start_time = None
 
         async with self._session_lock:
             self._session_cookies = None

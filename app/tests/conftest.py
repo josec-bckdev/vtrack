@@ -348,6 +348,39 @@ def collection_manager_with_db(db_session):
 
 
 # =============================================================================
+# OPENTELEMETRY FIXTURES — shared across all test files
+# =============================================================================
+
+@pytest.fixture(scope="session")
+def otel_exporter():
+    """Session-scoped InMemorySpanExporter wired to the global TracerProvider.
+
+    Set up once so module-level tracers (scheduler._tracer, scraper_async._tracer,
+    conductor._tracer) resolve to this provider on first use and stay cached.
+    """
+    import opentelemetry.trace as trace_api
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    trace_api._TRACER_PROVIDER = None
+    trace_api._TRACER_PROVIDER_SET_ONCE._done = False
+    trace.set_tracer_provider(provider)
+    return exporter
+
+
+@pytest.fixture
+def span_exporter(otel_exporter):
+    """Per-test: clear the shared exporter so each test sees only its own spans."""
+    otel_exporter.clear()
+    yield otel_exporter
+
+
+# =============================================================================
 # REDIS AND MESSAGE QUEUE FIXTURES
 # =============================================================================
 

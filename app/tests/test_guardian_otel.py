@@ -12,12 +12,6 @@ from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import opentelemetry.trace as trace_api
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-
 from app.config import JobSlot
 from app.scheduler import Scheduler, GuardianState
 
@@ -50,21 +44,9 @@ def _make_adapter(*, running: bool = False):
     return adapter
 
 
-@pytest.fixture(scope="session")
-def _guardian_provider():
-    exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace_api._TRACER_PROVIDER = None
-    trace_api._TRACER_PROVIDER_SET_ONCE._done = False
-    trace.set_tracer_provider(provider)
-    return exporter
-
-
 @pytest.fixture(autouse=True)
-def span_exporter(_guardian_provider):
-    _guardian_provider.clear()
-    yield _guardian_provider
+def span_exporter(span_exporter):  # noqa: F811 — shadows conftest fixture intentionally
+    yield span_exporter
 
 
 def _freeze(frozen: datetime):
