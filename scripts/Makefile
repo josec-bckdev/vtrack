@@ -1,6 +1,6 @@
 ## VTrack Development Makefile
 # Comprehensive development, testing, and operations commands
-# All scripts are in the scripts/ directory
+# Run from project root: make <target>
 
 .PHONY: help
 
@@ -15,13 +15,13 @@ help: ## Display this help message
 
 ##@ Docker & Services
 build: ## Build the API Docker image (no cache)
-	cd .. && docker compose build api --no-cache
+	docker compose build api --no-cache
 
 up: ## Start all services in background
-	cd .. && docker compose up -d
+	docker compose up -d
 
 down: ## Stop and remove all containers
-	cd .. && docker compose down
+	docker compose down
 
 rebuild: down build up ## Rebuild API image and restart services
 
@@ -60,46 +60,46 @@ services-clean: ## Remove all containers and volumes (DESTRUCTIVE)
 
 ##@ Development Mode (Hot-Reload)
 dev-up: ## Start services with dev overrides (hot-reload enabled)
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 dev-down: ## Stop dev mode services
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 
 dev-start: dev-up ## Alias for dev-up
 
 dev-restart: ## Restart services in dev mode
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
 
 dev-restart-api: ## Restart only API in dev mode
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml restart api
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart api
 
 dev-restart-alert: ## Restart only alert-processor in dev mode
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml restart alert-processor
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml restart alert-processor
 
 dev-build: ## Build images for dev mode
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml build
 
 dev-rebuild: ## Rebuild images in dev mode (no cache)
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
 
 dev-logs: ## Show logs in dev mode
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
 
 dev-logs-api: ## Show API logs in dev mode
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api
 
 dev-logs-alert: ## Show alert-processor logs in dev mode
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f alert-processor
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f alert-processor
 
 dev-status: ## Show dev mode service status
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
 
 ##@ Database & Migrations
 migrate: ## Run database migrations (upgrade to head)
 	./migrate.sh upgrade
 
 migrate-run: ## Run alembic upgrade head inside api container
-	cd .. && docker compose exec api alembic upgrade head
+	docker compose exec api alembic upgrade head
 
 migrate-current: ## Show current migration version
 	./migrate.sh current
@@ -127,7 +127,7 @@ revision: migrate-create ## Alias for migrate-create
 current: migrate-current ## Alias for migrate-current
 
 db-shell: ## Open psql shell to the database
-	cd .. && docker compose exec db psql -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+	docker compose exec db psql -U $${POSTGRES_USER} -d $${POSTGRES_DB}
 
 ##@ Monitoring & Queue Management
 redis-monitor: ## Monitor Redis queues in real-time
@@ -137,7 +137,7 @@ queue-stats: ## Show Redis queue statistics
 	./microservices.sh queue-stats
 
 logs: ## Follow API container logs
-	cd .. && docker compose logs -f api
+	docker compose logs -f api
 
 ##@ Testing & Debugging
 test-debug-help: ## Show test debugging commands reference
