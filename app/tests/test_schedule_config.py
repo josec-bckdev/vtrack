@@ -103,7 +103,7 @@ class TestSchedulerUsesConfigTimes:
             sleep_calls.append(seconds)
             scheduler.is_running = False
 
-        with patch("app.main.datetime") as mock_dt:
+        with patch("app.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = fixed_now
             mock_dt.combine = datetime.combine
             with patch("asyncio.sleep", side_effect=one_shot_sleep):
@@ -131,7 +131,7 @@ class TestSchedulerUsesConfigTimes:
             sleep_calls.append(seconds)
             scheduler.is_running = False
 
-        with patch("app.main.datetime") as mock_dt:
+        with patch("app.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = fixed_now
             mock_dt.combine = datetime.combine
             with patch("asyncio.sleep", side_effect=one_shot_sleep):
