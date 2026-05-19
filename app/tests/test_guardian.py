@@ -263,3 +263,166 @@ class TestGuardianMissed:
 
         assert any("miss" in r.message.lower() or "missed" in r.message.lower()
                    for r in caplog.records)
+
+
+# =============================================================================
+# Outcome tracking — get_guardian_status reflects last completed run
+# =============================================================================
+
+class TestGuardianOutcomeTracking:
+
+    def test_initial_status_has_no_outcome(self):
+        from app.scheduler import Scheduler
+        scheduler = Scheduler()
+        status = scheduler.get_guardian_status()
+        assert status["morning"]["last_outcome"] is None
+        assert status["afternoon"]["last_outcome"] is None
+
+    def test_initial_status_has_no_completed_at(self):
+        from app.scheduler import Scheduler
+        scheduler = Scheduler()
+        status = scheduler.get_guardian_status()
+        assert status["morning"]["completed_at"] is None
+        assert status["afternoon"]["completed_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_status_records_started_outcome_after_self_start(self):
+        """After guardian fires, get_guardian_status shows last_outcome=started."""
+        from app.scheduler import Scheduler, GuardianState
+        from app.domain.ports import ICollectionStatusAdapter
+        from app.config import JobSlot, ScheduleConfig
+
+        scheduler = Scheduler()
+        slot = JobSlot(time(5, 0), time(5, 45), 5, time(6, 40))
+        scheduler._schedule_config = ScheduleConfig(
+            timezone="America/Bogota",
+            cookie_refresh_morning=time(5, 40),
+            cookie_refresh_afternoon=time(15, 10),
+            collection_morning=slot,
+            collection_afternoon=slot,
+        )
+        mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
+        mock_adapter.start = AsyncMock()
+        mock_adapter.is_running.return_value = False
+
+        clock = iter([_dt(5, 51), _dt(5, 51)])
+
+        async def fake_sleep(s): pass
+
+        with patch("app.scheduler.datetime") as mock_dt, \
+             patch("asyncio.sleep", side_effect=fake_sleep):
+            mock_dt.now.side_effect = lambda tz=None: next(clock, _dt(7, 0))
+            mock_dt.combine = datetime.combine
+            await scheduler.activate_guardian("morning", mock_adapter)
+            # Wait for the background task to complete
+            if scheduler.morning_guardian_task:
+                await scheduler.morning_guardian_task
+
+        status = scheduler.get_guardian_status()
+        assert status["morning"]["last_outcome"] == GuardianState.STARTED.value
+
+    @pytest.mark.asyncio
+    async def test_status_records_missed_outcome_after_window_close(self):
+        """After a missed slot, get_guardian_status shows last_outcome=missed."""
+        from app.scheduler import Scheduler, GuardianState
+        from app.domain.ports import ICollectionStatusAdapter
+        from app.config import JobSlot, ScheduleConfig
+
+        scheduler = Scheduler()
+        slot = JobSlot(time(5, 0), time(5, 45), 5, time(6, 40))
+        scheduler._schedule_config = ScheduleConfig(
+            timezone="America/Bogota",
+            cookie_refresh_morning=time(5, 40),
+            cookie_refresh_afternoon=time(15, 10),
+            collection_morning=slot,
+            collection_afternoon=slot,
+        )
+        mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
+        mock_adapter.start = AsyncMock()
+        mock_adapter.is_running.return_value = False
+
+        clock = iter([_dt(7, 0)])
+
+        async def fake_sleep(s): pass
+
+        with patch("app.scheduler.datetime") as mock_dt, \
+             patch("asyncio.sleep", side_effect=fake_sleep):
+            mock_dt.now.side_effect = lambda tz=None: next(clock, _dt(7, 0))
+            mock_dt.combine = datetime.combine
+            await scheduler.activate_guardian("morning", mock_adapter)
+            if scheduler.morning_guardian_task:
+                await scheduler.morning_guardian_task
+
+        status = scheduler.get_guardian_status()
+        assert status["morning"]["last_outcome"] == GuardianState.MISSED.value
+
+    @pytest.mark.asyncio
+    async def test_status_records_completed_at_timestamp(self):
+        """completed_at is a non-None string after a guardian run finishes."""
+        from app.scheduler import Scheduler
+        from app.domain.ports import ICollectionStatusAdapter
+        from app.config import JobSlot, ScheduleConfig
+
+        scheduler = Scheduler()
+        slot = JobSlot(time(5, 0), time(5, 45), 5, time(6, 40))
+        scheduler._schedule_config = ScheduleConfig(
+            timezone="America/Bogota",
+            cookie_refresh_morning=time(5, 40),
+            cookie_refresh_afternoon=time(15, 10),
+            collection_morning=slot,
+            collection_afternoon=slot,
+        )
+        mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
+        mock_adapter.start = AsyncMock()
+        mock_adapter.is_running.return_value = False
+
+        clock = iter([_dt(7, 0)])
+
+        async def fake_sleep(s): pass
+
+        with patch("app.scheduler.datetime") as mock_dt, \
+             patch("asyncio.sleep", side_effect=fake_sleep):
+            mock_dt.now.side_effect = lambda tz=None: next(clock, _dt(7, 0))
+            mock_dt.combine = datetime.combine
+            await scheduler.activate_guardian("morning", mock_adapter)
+            if scheduler.morning_guardian_task:
+                await scheduler.morning_guardian_task
+
+        status = scheduler.get_guardian_status()
+        assert status["morning"]["completed_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_afternoon_outcome_independent_of_morning(self):
+        """morning and afternoon outcomes are tracked independently."""
+        from app.scheduler import Scheduler, GuardianState
+        from app.domain.ports import ICollectionStatusAdapter
+        from app.config import JobSlot, ScheduleConfig
+
+        scheduler = Scheduler()
+        slot = JobSlot(time(5, 0), time(5, 45), 5, time(6, 40))
+        scheduler._schedule_config = ScheduleConfig(
+            timezone="America/Bogota",
+            cookie_refresh_morning=time(5, 40),
+            cookie_refresh_afternoon=time(15, 10),
+            collection_morning=slot,
+            collection_afternoon=slot,
+        )
+        mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
+        mock_adapter.start = AsyncMock()
+        mock_adapter.is_running.return_value = False
+
+        clock = iter([_dt(7, 0)])
+
+        async def fake_sleep(s): pass
+
+        with patch("app.scheduler.datetime") as mock_dt, \
+             patch("asyncio.sleep", side_effect=fake_sleep):
+            mock_dt.now.side_effect = lambda tz=None: next(clock, _dt(7, 0))
+            mock_dt.combine = datetime.combine
+            await scheduler.activate_guardian("morning", mock_adapter)
+            if scheduler.morning_guardian_task:
+                await scheduler.morning_guardian_task
+
+        status = scheduler.get_guardian_status()
+        assert status["morning"]["last_outcome"] == GuardianState.MISSED.value
+        assert status["afternoon"]["last_outcome"] is None
