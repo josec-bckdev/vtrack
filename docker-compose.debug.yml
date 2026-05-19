@@ -1,0 +1,16 @@
+# Debug override — attaches VS Code debugger via debugpy
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up
+#
+# Then in VS Code: Run & Debug → "FastAPI Debug" → F5
+# The container waits for the debugger to attach before starting the app.
+
+services:
+  api:
+    # No --reload: uvicorn reload kills the process on file save, dropping the debugpy connection
+    command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "5678:5678"
+    # Don't auto-restart on crash — makes it easier to see why it died
+    restart: "no"
