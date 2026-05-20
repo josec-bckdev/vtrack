@@ -36,36 +36,68 @@ class VncBrowserGateway(IBrowserGateway):
       GET  /cookies         → {"cf_clearance": str, "ci_session": str}
     """
 
-    def __init__(self, base_url: str, container_name: str, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        container_name: str,
+        timeout: float = 30.0,
+        container_image: str = "vtrack-vnc-browser",
+        container_network: str = "vtrack-network",
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._container_name = container_name
         self._timeout = timeout
+        self._container_image = container_image
+        self._container_network = container_network
         self._client: Optional[httpx.AsyncClient] = None
         self._docker = docker.from_env()
+
+    def _create_container(self):
+        """Create the VNC browser container from image, attached to the project network."""
+        networking = self._docker.api.create_networking_config({
+            self._container_network: self._docker.api.create_endpoint_config(
+                aliases=["vnc-browser"]
+            )
+        })
+        resp = self._docker.api.create_container(
+            image=self._container_image,
+            name=self._container_name,
+            host_config=self._docker.api.create_host_config(
+                port_bindings={"6080/tcp": 6080},
+                network_mode=self._container_network,
+            ),
+            networking_config=networking,
+        )
+        container = self._docker.containers.get(resp["Id"])
+        logger.info("Created container '%s' from image '%s'", self._container_name, self._container_image)
+        return container
 
     async def start(self) -> None:
         logger.info("Starting VNC browser container: %s", self._container_name)
         try:
             container = self._docker.containers.get(self._container_name)
         except docker.errors.NotFound:
-            raise RuntimeError(
-                f"VNC browser container '{self._container_name}' not found. "
-                "Run: docker compose --profile tools up vnc-browser --no-start"
+            logger.info(
+                "Container '%s' not found — creating from image '%s'",
+                self._container_name,
+                self._container_image,
             )
+            container = self._create_container()
 
         if container.status != "running":
             try:
                 container.start()
-            except docker.errors.NotFound as exc:
-                logger.warning("Container '%s' has a missing network — removing stale container", self._container_name)
+            except docker.errors.NotFound:
+                logger.warning(
+                    "Container '%s' has a missing network — removing and recreating",
+                    self._container_name,
+                )
                 try:
                     container.remove(force=True)
                 except Exception:
                     pass
-                raise RuntimeError(
-                    f"VNC browser container '{self._container_name}' had a stale network and was removed. "
-                    "Recreate with: docker compose --profile tools up vnc-browser --no-start"
-                ) from exc
+                container = self._create_container()
+                container.start()
             logger.info("Container started — waiting for Chromium to be ready")
         else:
             logger.info("Container already running — waiting for health check")

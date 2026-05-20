@@ -10,10 +10,19 @@ from app.cookie_refresh.domain.entities import SessionCookies
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_gateway(base_url: str = "http://vnc-browser:8080",
-                  container_name: str = "vnc_browser") -> VncBrowserGateway:
+def _make_gateway(
+    base_url: str = "http://vnc-browser:8080",
+    container_name: str = "vnc_browser",
+    container_image: str = "vtrack-vnc-browser",
+    container_network: str = "vtrack-network",
+) -> VncBrowserGateway:
     with patch("app.cookie_refresh.adapters.vnc_browser.docker.from_env"):
-        return VncBrowserGateway(base_url=base_url, container_name=container_name)
+        return VncBrowserGateway(
+            base_url=base_url,
+            container_name=container_name,
+            container_image=container_image,
+            container_network=container_network,
+        )
 
 
 def _running_container() -> MagicMock:
@@ -62,13 +71,22 @@ class TestVncBrowserGatewayLifecycle:
 
         container.start.assert_called_once()
 
-    async def test_start_raises_when_container_not_found(self):
+    async def test_start_creates_container_when_not_found(self):
         import docker.errors
         gw = _make_gateway()
-        gw._docker.containers.get.side_effect = docker.errors.NotFound("not found")
+        new_container = _stopped_container()
+        gw._docker.containers.get.side_effect = [
+            docker.errors.NotFound("not found"),
+            new_container,
+        ]
+        gw._create_container = MagicMock(return_value=new_container)
 
-        with pytest.raises(RuntimeError, match="not found"):
-            await gw.start()
+        with patch.object(gw, "_wait_for_health", new=AsyncMock()):
+            with patch("httpx.AsyncClient"):
+                await gw.start()
+
+        gw._create_container.assert_called_once()
+        new_container.start.assert_called_once()
 
     async def test_close_stops_running_container(self):
         gw = _make_gateway()
@@ -215,17 +233,22 @@ class TestVncBrowserGatewayClose:
 
 @pytest.mark.asyncio
 class TestVncBrowserGatewayStaleNetwork:
-    async def test_start_removes_stale_container_and_raises(self):
+    async def test_start_recreates_and_starts_when_network_stale(self):
         import docker.errors
         gw = _make_gateway()
-        container = _stopped_container()
-        container.start.side_effect = docker.errors.NotFound("network gone")
-        gw._docker.containers.get.return_value = container
+        stale_container = _stopped_container()
+        stale_container.start.side_effect = docker.errors.NotFound("network gone")
+        new_container = _stopped_container()
+        gw._docker.containers.get.return_value = stale_container
+        gw._create_container = MagicMock(return_value=new_container)
 
-        with pytest.raises(RuntimeError, match="stale network"):
-            await gw.start()
+        with patch.object(gw, "_wait_for_health", new=AsyncMock()):
+            with patch("httpx.AsyncClient"):
+                await gw.start()
 
-        container.remove.assert_called_once()
+        stale_container.remove.assert_called_once()
+        gw._create_container.assert_called_once()
+        new_container.start.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

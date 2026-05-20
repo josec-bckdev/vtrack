@@ -5,6 +5,8 @@ import os
 class CookieRefreshSettings:
     vnc_browser_url: str = os.environ.get("VNC_BROWSER_URL", "http://vnc-browser:8080")
     vnc_container_name: str = os.environ.get("VNC_CONTAINER_NAME", "vnc_browser")
+    vnc_container_image: str = os.environ.get("VNC_CONTAINER_IMAGE", "vtrack-vnc-browser")
+    vnc_container_network: str = os.environ.get("VNC_CONTAINER_NETWORK", "vtrack-network")
     programmed_steps_path: str = os.environ.get("PROGRAMMED_STEPS_PATH", "/data/programmed_steps.json")
     login_email: str = os.environ.get("LOGIN_EMAIL", "")
     login_password: str = os.environ.get("LOGIN_PASSWORD", "")

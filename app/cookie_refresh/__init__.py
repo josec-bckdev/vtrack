@@ -41,6 +41,8 @@ async def run_refresh(collection_manager: "AsyncCollectionManager") -> bool:
     browser = VncBrowserGateway(
         base_url=s.vnc_browser_url,
         container_name=s.vnc_container_name,
+        container_image=s.vnc_container_image,
+        container_network=s.vnc_container_network,
     )
     vtrack = DirectVtrackGateway(collection_manager)
 
