@@ -31,14 +31,22 @@ def _find_span(spans, name):
 
 @pytest.fixture(scope="session")
 def _otel_provider():
-    """Session-scoped: configure the global TracerProvider once so the module-level
-    tracer in conductor.py resolves to this provider on first use and stays cached."""
+    """Session-scoped: install an in-memory TracerProvider and reset the ProxyTracer
+    cache on conductor.conductor._tracer so that concurrent test suites (app/tests)
+    don't leave a stale _real_tracer pointer bound to their own provider."""
+    import conductor.conductor as conductor_module
+
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     trace_api._TRACER_PROVIDER = None
     trace_api._TRACER_PROVIDER_SET_ONCE._done = False
     trace.set_tracer_provider(provider)
+    # ProxyTracer caches _real_tracer on first use — clear it so the proxy
+    # re-binds to the new provider rather than keeping a reference to whichever
+    # provider was active during earlier test_conductor.py execution.
+    if hasattr(conductor_module._tracer, "_real_tracer"):
+        conductor_module._tracer._real_tracer = None
     return exporter
 
 
