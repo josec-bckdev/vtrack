@@ -74,7 +74,7 @@ class TestCollectionTotalCounter:
             outcome = await Scheduler()._run_and_record("ctr_started", slot, adapter)
 
         assert outcome == GuardianState.STARTED
-        assert _sample("vtrack_collection_total_total", slot="ctr_started", outcome="started") == 1.0
+        assert _sample("vtrack_collection_total", slot="ctr_started", outcome="started") == 1.0
 
     async def test_increments_on_missed_outcome(self):
         slot = _make_slot()
@@ -85,7 +85,7 @@ class TestCollectionTotalCounter:
             outcome = await Scheduler()._run_and_record("ctr_missed", slot, adapter)
 
         assert outcome == GuardianState.MISSED
-        assert _sample("vtrack_collection_total_total", slot="ctr_missed", outcome="missed") == 1.0
+        assert _sample("vtrack_collection_total", slot="ctr_missed", outcome="missed") == 1.0
 
     async def test_counter_label_is_slot_specific(self):
         slot = _make_slot()
@@ -95,7 +95,7 @@ class TestCollectionTotalCounter:
             await Scheduler()._run_and_record("ctr_label_check", slot, adapter)
 
         # Different slot should not have been incremented
-        assert _sample("vtrack_collection_total_total", slot="other_slot", outcome="started") is None
+        assert _sample("vtrack_collection_total", slot="other_slot", outcome="started") is None
 
 
 # =============================================================================
