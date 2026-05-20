@@ -1,4 +1,4 @@
-# VTrack - Real-Time Vehicle Tracking & Geofencing Platform
+# VTrack — Real-Time Vehicle Tracking & Geofencing Platform
 
 > A production-ready microservices platform for GPS tracking and geofence alerting, built with modern Python backend technologies.
 
@@ -10,527 +10,357 @@
 ![Docker](https://img.shields.io/badge/docker-compose-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-**[Live Demo](#) | [Documentation](docs/README.md) | [API Docs](http://localhost:8000/docs) | [Architecture](docs/architecture/overview.md)**
+**[Documentation](docs/README.md) | [API Docs](http://localhost:8000/docs) | [Architecture](docs/architecture/overview.md)**
 
 ---
 
-## 🎯 What This Project Demonstrates
+## What This Project Demonstrates
 
 This is a **portfolio project** showcasing modern backend engineering practices:
 
-- **Microservices Architecture** - Event-driven, independently scalable services
-- **Async Message Queues** - Redis-based producer-consumer pattern for high throughput
-- **Real-time Processing** - Sub-second geofence detection with <100ms latency
-- **Production Ready** - Docker orchestration, health checks, graceful shutdown, structured logging
-- **Comprehensive Testing** - 27+ unit & integration tests with pytest
-- **Modern Python** - FastAPI, async/await, type hints, Pydantic validation
+- **Clean Architecture** — domain/ports/adapters/application/infrastructure layering enforced across every service
+- **Microservices** — event-driven, independently managed services coordinated by a conductor
+- **Distributed Tracing** — OpenTelemetry spans across all services, visualised in Grafana Tempo
+- **TDD throughout** — strict red→green→refactor with Commitizen commit discipline
+- **Container Lifecycle Orchestration** — always-on conductor starts/stops the managed stack around collection windows
+- **Async Message Queues** — Redis-based producer-consumer pattern for coordinates and alerts
+- **Real-time Processing** — sub-second geofence detection across configurable zones
 
-Built as a real-world solution for tracking 100+ vehicles and sending instant notifications on zone entry/exit events.
+Built as a real-world solution for tracking 100+ vehicles and sending instant Telegram notifications on zone entry/exit events.
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
-        A[Web/Mobile Client]
+    subgraph "Always-on"
+        COND[Conductor<br/>Container lifecycle]
     end
-    
-    subgraph "API Layer"
-        B[FastAPI Service<br/>Port 8000]
-        B1[Data Collector<br/>Async Scraper]
+
+    subgraph "Managed — started per collection window"
+        API[FastAPI / vtrack<br/>Port 8000]
+        DB[(PostgreSQL<br/>Port 5432)]
+        REDIS[(Redis<br/>Port 6379)]
+        AP[Alert Processor<br/>Geofence engine]
+        NS[Notification Sender<br/>Telegram]
     end
-    
-    subgraph "Message Queue Layer"
-        C[(Redis<br/>Port 6379)]
-        C1[coordinate_queue]
-        C2[alert_queue]
+
+    subgraph "Observability"
+        TEMPO[Grafana Tempo<br/>Trace storage]
+        PROM[Prometheus<br/>Metrics]
+        GRAF[Grafana<br/>Dashboards]
     end
-    
-    subgraph "Processing Layer"
-        D[Alert Processor<br/>Geofence Engine]
-        E[Notification Sender<br/>Multi-User Alerts]
-    end
-    
-    subgraph "Data Layer"
-        F[(PostgreSQL<br/>Port 5432)]
-    end
-    
-    subgraph "External Services"
-        G[Telegram API]
-        H[Users]
-    end
-    
-    A -->|HTTP POST/GET| B
-    B --> B1
-    B1 -->|Store| F
-    B1 -->|LPUSH coords| C1
-    C1 -->|RPOP| D
-    D -->|Check zones| D
-    D -->|LPUSH alerts| C2
-    C2 -->|RPOP| E
-    E -->|Send| G
-    G -->|Notify| H
-    
-    style B fill:#009688
-    style D fill:#FF6F00
-    style E fill:#7B1FA2
-    style C fill:#D32F2F
-    style F fill:#0288D1
+
+    COND -->|start/stop via Docker SDK| API
+    COND -->|activate guardian via HTTP| API
+    COND -->|W3C traceparent| API
+
+    API -->|push coordinates| REDIS
+    API -->|persist| DB
+    REDIS -->|pop coordinates| AP
+    AP -->|push alerts| REDIS
+    REDIS -->|pop alerts| NS
+    NS -->|Telegram Bot API| Users
+
+    API -->|OTLP gRPC| TEMPO
+    COND -->|OTLP gRPC| TEMPO
+    AP -->|OTLP gRPC| TEMPO
+    NS -->|OTLP gRPC| TEMPO
+    API -->|/metrics| PROM
+    TEMPO --> GRAF
+    PROM --> GRAF
+
+    style COND fill:#7B1FA2
+    style API fill:#009688
+    style AP fill:#FF6F00
+    style NS fill:#0288D1
+    style TEMPO fill:#F57C00
+    style GRAF fill:#E64A19
 ```
 
-**Data Flow:**
-`GPS Coordinates` → `FastAPI` → `Redis Queue` → `Alert Processor` → `Alert Queue` → `Notification Service` → `Users`
+**Data flow:** `Conductor starts stack` → `Guardian triggers collection` → `GPS coordinates` → `Redis` → `Alert Processor` → `alerts` → `Notification Sender` → `Telegram`
 
-See [detailed architecture docs](docs/architecture/overview.md) for complete system design.
+**Trace flow:** `conductor.slot` → `guardian.slot.*` → `collection.run` → `cookie_refresh.run` (W3C traceparent propagation); `alert_processor.*` and `notification_sender.*` emit independent root spans correlated by `slot.date`.
 
----
-
-## 💼 Backend Engineering Highlights
-
-### 🔥 Core Capabilities
-
-| Feature | Implementation | Business Value |
-|---------|----------------|----------------|
-| **High Throughput** | Async Python + Redis queues | Process 500+ coordinates/min |
-| **Real-time Alerts** | Event-driven microservices | <100ms detection latency |
-| **Scalability** | Horizontal scaling via Docker | Independent service scaling |
-| **Reliability** | Queue-based retries + health checks | 99.9% uptime capability |
-| **Multi-tenancy** | YAML-based user management | Role-based notifications |
-| **Observability** | Structured logs + Redis monitor | Production debugging ready |
-
-### 🛠️ Technical Stack
-
-**Backend Framework:** FastAPI (FastAPI, Uvicorn, async/await)  
-**Languages:** Python 3.12 with type hints  
-**Database:** PostgreSQL 16 + Alembic migrations  
-**Message Queue:** Redis 7 (Lists as FIFO queues)  
-**Infrastructure:** Docker Compose orchestration  
-**Testing:** pytest, pytest-asyncio, pytest-cov  
-**API Docs:** Auto-generated OpenAPI (Swagger)  
-**Monitoring:** Custom Redis dashboard, Docker logs  
-
-### 📐 Design Patterns
-
-- ✅ **Producer-Consumer** - Decoupled async processing
-- ✅ **Repository Pattern** - Database abstraction
-- ✅ **Dependency Injection** - FastAPI DI container
-- ✅ **Factory Pattern** - Service instantiation
-- ✅ **Observer Pattern** - Event-driven alerts
-- ✅ **Circuit Breaker** - Graceful degradation
+See [architecture docs](docs/architecture/overview.md) for the full design.
 
 ---
 
-## ✨ Key Features
+## Engineering Highlights
 
-### For End Users
-- 🗺️ **Real-time GPS Tracking** - Track 100+ vehicles simultaneously
-- 🚨 **Geofence Alerts** - Instant notifications on zone entry/exit
-- 📱 **Multi-User Notifications** - Telegram alerts with role-based filtering
-- 🎯 **Multiple Zone Support** - Configure unlimited geofence zones
-- 📊 **Historical Data** - PostgreSQL persistence for analytics
+### Core capabilities
 
-### For Developers
-- 🐳 **Docker Compose** - One-command deployment
-- 🔄 **Hot Reload** - Development mode with auto-restart
-- 🧪 **Test Suite** - 27 tests with 90%+ coverage
-- 📝 **API Documentation** - Auto-generated Swagger UI
-- 🛠️ **Dev Tools** - Redis monitor, test data generators
-- 📖 **Comprehensive Docs** - Architecture, guides, troubleshooting
+| Capability | Implementation | Detail |
+| --- | --- | --- |
+| Container lifecycle | Conductor + Docker SDK | Starts/stops 5 services around two daily collection windows |
+| Guardian state machine | `app/scheduler.py` | IDLE → WATCHING → STARTED/MISSED per slot |
+| Distributed tracing | OpenTelemetry + Grafana Tempo | Full trace from conductor slot to collection run |
+| Geofence detection | `shared/location_alerts.py` | Entry/exit detection against YAML-defined zones |
+| Cookie refresh | ReAct loop in `app/cookie_refresh/` | Programmed browser steps via VNC container |
+| Async data collection | `app/scraper_async.py` | Polls remote API, persists to PostgreSQL, enqueues to Redis |
+
+### Technical stack
+
+**Runtime:** Python 3.12, FastAPI, Uvicorn, async/await, Pydantic  
+**Storage:** PostgreSQL 16 + Alembic, Redis 7  
+**Tracing:** OpenTelemetry API/SDK 1.25, Grafana Tempo, Prometheus, Grafana  
+**Infrastructure:** Docker Compose — 9 services total  
+**Testing:** pytest, pytest-asyncio, pytest-cov — 427 tests, 97% coverage  
+**Tooling:** Commitizen, mypy, flake8
+
+### Architecture patterns
+
+- **Clean Architecture** — `domain → ports → adapters → application → infrastructure` dependency rule enforced by code review and CLAUDE.md
+- **Ports and Adapters (Hexagonal)** — `IRouteDataRepository`, `ICollectionStateStore`, `IVtrackGateway`, `IContainerGateway` ABCs; all mocked at port boundaries in tests
+- **Repository Pattern** — `SqlAlchemyRouteRepository` behind `IRouteDataRepository`
+- **State Machine** — Guardian (`IDLE → WATCHING → STARTED | MISSED`) in `app/scheduler.py`
+- **ReAct loop** — Conductor observes → reasons → acts on container and slot state
+- **Producer-Consumer** — Redis FIFO queues decoupling collection, alerting, and notification
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
+
 - Docker & Docker Compose
 - Python 3.12+ (for local development)
-- Git
 
-### 1. Clone & Setup
+### 1. Clone and configure
 
 ```bash
-git clone https://github.com/yourusername/vtrack.git
+git clone https://github.com/josec-bckdev/vtrack.git
 cd vtrack
-
-# Copy environment template
 cp .env.example .env
-
-# Edit with your credentials
-nano .env
+# Fill in POSTGRES_*, DATABASE_URL, TELEGRAM_BOT_TOKEN, LOGIN_EMAIL, LOGIN_PASSWORD
 ```
 
-### 2. Start All Services
+### 2. Start the stack
 
 ```bash
-# Start entire stack
 docker-compose up -d
 
-# Verify all services are running
-docker-compose ps
-
-# Expected output: 6 services running
-# ✅ postgres_db, redis_queue, fastapi_api, 
-#    alert_processor, notification_sender, pgadmin
+# The conductor starts automatically (restart: always)
+# It will start the managed services at the next collection window
+# or immediately if you are already inside a window
 ```
 
-### 3. Access Services
+### 3. Access services
 
-- **API**: http://localhost:8000
-- **Swagger Docs**: http://localhost:8000/docs
-- **Redis Monitor**: `python scripts/redis_monitor.py`
-- **PgAdmin**: http://localhost:8080
+| Service | URL |
+| --- | --- |
+| vtrack API | <http://localhost:8000> |
+| Swagger UI | <http://localhost:8000/docs> |
+| Grafana | <http://localhost:3000> |
+| Prometheus | <http://localhost:9090> |
+| Tempo (trace API) | <http://localhost:3200> |
 
-### 4. Test the System
+### 4. Manually trigger a collection cycle
 
 ```bash
-# Start data collection
-curl -X POST http://localhost:8000/collection/start
+# Start collection (the conductor normally does this automatically)
+curl -X POST http://localhost:8000/collect/start
 
-# View logs
-docker-compose logs -f alert_processor
+# Check guardian state
+curl http://localhost:8000/monitor/guardian
 
-# Check queue status
-python scripts/redis_monitor.py --interval 1
+# Check collection status
+curl http://localhost:8000/collect/status
 ```
-
-See [Quick Start Guide](docs/getting-started/quickstart.md) for detailed setup.
 
 ---
 
-## 📚 Documentation
-
-Complete documentation is organized in the [`docs/`](docs/) directory:
-
-| Section | Description |
-|---------|-------------|
-| **[Getting Started](docs/getting-started/)** | Installation, setup, first run |
-| **[Architecture](docs/architecture/)** | System design, data flow, components |
-| **[Development Guides](docs/guides/)** | Workflows, debugging, best practices |
-| **[Testing](docs/testing/)** | Test suite, coverage, integration tests |
-| **[API Reference](http://localhost:8000/docs)** | Auto-generated OpenAPI docs |
-
-📖 Start here: [**docs/README.md**](docs/README.md)
-
----
-
-## 🧪 Testing
-
-### Run Test Suite
-
-```bash
-# All tests
-pytest app/tests/ -v
-
-# With coverage report
-pytest app/tests/ --cov=app --cov-report=html
-
-# Specific test file
-pytest app/tests/test_api_endpoints.py -v
-
-# Microservice tests
-cd microservices/notification-sender
-pytest -v
-```
-
-### Integration Testing
-
-```bash
-# Test alert processor
-python scripts/test_alert_processor.py --scenario zone
-
-# Load testing
-python scripts/test_alert_processor.py --load 100
-
-# Monitor queues in real-time
-python scripts/redis_monitor.py --interval 1
-```
-
-**Test Coverage:** 27+ tests covering:
-- ✅ API endpoints
-- ✅ Geofence logic
-- ✅ Message queue operations
-- ✅ Database models
-- ✅ Multi-user notifications
-- ✅ Async scraper
-
-See [Testing Guide](docs/testing/guide.md) for comprehensive testing documentation.
-
----
-
-## 🛠️ Development Workflow
-
-### Local Development
-
-```bash
-# Hot reload mode (code changes auto-restart)
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-
-# View logs
-docker-compose logs -f api
-
-# Access container shell
-docker exec -it fastapi_api /bin/bash
-```
-
-### Monitoring Tools
-
-```bash
-# Redis queue monitor (real-time)
-python scripts/redis_monitor.py --interval 1
-
-# Database migrations
-docker-compose run migrate
-
-# Check service health
-docker-compose ps
-curl http://localhost:8000/health
-```
-
-### Code Quality
-
-```bash
-# Type checking
-mypy app/
-
-# Linting
-flake8 app/
-
-# Format code
-black app/
-```
-
-See [Development Workflow](docs/guides/development/workflow.md) for detailed guide.
-
----
-
-## 📊 Project Structure
+## Project Structure
 
 ```
 vtrack/
-├── app/                        # Main FastAPI application
-│   ├── main.py                # API routes & endpoints
-│   ├── models.py              # SQLAlchemy models
-│   ├── database.py            # DB connection
-│   ├── scraper_async.py       # Data collection service
-│   └── tests/                 # Test suite (27+ tests)
+├── app/                            # vtrack — FastAPI application
+│   ├── main.py                     # Routes, lifespan, OTel + scheduler wiring
+│   ├── scheduler.py                # Guardian state machine (Scheduler class)
+│   ├── scraper_async.py            # Async data collection (AsyncCollectionManager)
+│   ├── tracing.py                  # OTel SDK setup (configure_tracing)
+│   ├── monitoring.py               # /monitor/guardian endpoints
+│   ├── models.py                   # SQLAlchemy models
+│   ├── database.py                 # DB connection + session
+│   ├── cookie_refresh/             # Programmed cookie refresh (ReAct pattern)
+│   ├── domain/                     # Pure domain logic — no I/O, no frameworks
+│   │   ├── scraper.py              # parse_remote_datetime, normalize_route_data, …
+│   │   └── ports.py                # IRouteDataRepository, ICollectionStateStore ABCs
+│   ├── adapters/                   # Port implementations
+│   │   ├── route_repository.py     # SqlAlchemyRouteRepository
+│   │   ├── collection_state.py     # InMemoryCollectionState
+│   │   └── collection_status_adapter.py
+│   └── tests/                      # 354 tests, 97% coverage
 │
-├── microservices/             # Independent microservices
-│   ├── alert-processor/       # Geofence detection engine
-│   │   ├── main.py           # Consumer + processor
-│   │   └── location_alerts.py # Zone checking logic
+├── microservices/
+│   ├── conductor/                  # Always-on container lifecycle orchestrator
+│   │   ├── conductor.py            # Conductor (ReAct loop — startup + watch slot)
+│   │   ├── domain/                 # ResourcePolicy, IVtrackGateway, IContainerGateway
+│   │   ├── adapters/               # HttpxVtrackGateway, DockerContainerGateway, tracing.py
+│   │   ├── main.py                 # Entrypoint — wires OTel + gateway + conductor
+│   │   └── tests/                  # 62 tests
 │   │
-│   └── notification-sender/   # Multi-user alerts
-│       ├── main.py           # Notification consumer
-│       ├── providers/        # Telegram integration
-│       ├── users.yaml        # User configuration
-│       └── tests/            # Microservice tests
+│   ├── alert-processor/            # Geofence detection consumer
+│   │   ├── main.py                 # AlertConsumer — pops coordinates, emits OTel spans
+│   │   ├── tracing.py              # configure_tracing for alert-processor
+│   │   └── tests/                  # 5 OTel span tests
+│   │
+│   └── notification-sender/        # Alert delivery (Telegram)
+│       ├── main.py                 # NotificationConsumer — pops alerts, emits OTel spans
+│       ├── tracing.py              # configure_tracing for notification-sender
+│       ├── providers/telegram.py   # Telegram Bot API
+│       └── tests/
 │
-├── shared-package/            # Shared libraries
+├── shared-package/                 # Installed Python package — used by all services
 │   └── src/shared/
-│       └── message_queue.py  # Redis queue abstraction
+│       ├── message_queue.py        # Redis push/pop abstraction
+│       ├── location_alerts.py      # LocationAnalyzer, LocationAlert, zone definitions
+│       └── zones.yaml              # Geofence zone configuration
 │
-├── docs/                      # Complete documentation
-│   ├── architecture/         # System design
-│   ├── guides/               # How-to guides
-│   └── testing/              # Test documentation
+├── docker/                         # Infrastructure config files
+│   ├── tempo/tempo.yaml            # OTLP receiver + local storage
+│   ├── prometheus/prometheus.yml   # Scrapes vtrack /metrics
+│   └── grafana/provisioning/       # Tempo + Prometheus datasources
 │
-├── scripts/                   # Dev & monitoring tools
-│   ├── redis_monitor.py      # Queue monitoring
-│   └── test_alert_processor.py
+├── docs/                           # Documentation
+│   ├── architecture/               # System design, data flow, component details
+│   └── guides/                     # Redis, alert processor, deployment, git conventions
 │
-├── alembic/                   # Database migrations
-├── docker-compose.yml         # Production config
-├── docker-compose.dev.yml     # Development overrides
-└── pytest.ini                 # Test configuration
+├── previous-sprints/               # Archived session logs
+├── NEXT_SESSION.md                 # Proposed next steps
+├── CLAUDE.md                       # AI development guidelines (architecture contract, TDD rules)
+└── docker-compose.yml              # Full stack — 9 services
 ```
 
 ---
 
-## 🚢 Deployment
-
-### Production Deployment
+## Running Tests
 
 ```bash
-# Build and start all services
-docker-compose up -d --build
+# vtrack core (354 tests)
+pytest app/tests/ -v --cov=app --cov-report=term-missing
 
-# View service status
-docker-compose ps
+# Conductor (62 tests — run from microservice root)
+cd microservices/conductor && python -m pytest tests/ -v
 
-# Scale specific services
-docker-compose up -d --scale alert-processor=3
+# Alert processor (5 OTel span tests)
+cd microservices/alert-processor && python -m pytest tests/ -v
 
-# View aggregated logs
-docker-compose logs -f --tail=100
+# Notification sender OTel
+cd microservices/notification-sender && python -m pytest tests/test_notification_sender_otel.py -v
 ```
 
-### Environment Configuration
+**427 tests total — all green.**
 
-Required environment variables in `.env`:
+---
+
+## Container Lifecycle
+
+The **conductor** is the only service with `restart: always`. It owns the lifecycle of the other five:
+
+```
+On startup:
+  if inside a collection window  → start stack, wait for health, activate guardian
+  if outside                     → stop any running managed containers
+
+Per slot (morning 05:00–06:40, afternoon 14:30–16:30):
+  1. conductor.container.start   — docker start all 5 managed containers
+  2. conductor.health.wait       — poll GET /monitor/health until 200
+  3. conductor.guardian.activate — POST /monitor/guardian/activate
+  4. conductor.resource.eval     — query Docker stats; decide whether to stop after slot
+  5. conductor.slot.watch        — poll guardian state until collection completes
+  6. (optional) stop all managed containers if memory threshold exceeded
+```
+
+---
+
+## Observability
+
+All four services export OTLP traces directly to Grafana Tempo (port 4317, gRPC). Trace context propagates from conductor to vtrack via the W3C `traceparent` HTTP header.
+
+### Span inventory
+
+| Service | Spans |
+| --- | --- |
+| conductor | `conductor.slot`, `.container.start`, `.health.wait`, `.guardian.activate`, `.resource.eval`, `.slot.watch` |
+| vtrack | `guardian.slot.{name}`, `guardian.watching`, `guardian.collection.start`, `collection.run`, `cookie_refresh.run` |
+| alert-processor | `alert_processor.coordinate.process`, `alert_processor.alert.queue` |
+| notification-sender | `notification_sender.alert.send` |
+
+### OTel architecture rule
+
+`opentelemetry-api` only in application/domain layers. `opentelemetry-sdk` and exporters only in `tracing.py` (adapter) and `main.py` (infrastructure). This means OTel is a zero-cost no-op in all unit tests that don't configure a provider.
+
+---
+
+## Environment Variables
+
+Required in `.env`:
 
 ```bash
 # Database
 POSTGRES_USER=vtrack
 POSTGRES_PASSWORD=secure_password
 POSTGRES_DB=vtrack_db
-DATABASE_URL=postgresql://user:pass@db:5432/vtrack_db
+DATABASE_URL=postgresql://vtrack:secure_password@db:5432/vtrack_db
 
-# Redis
-REDIS_URL=redis://redis:6379/0
-
-# Telegram Notifications
+# Notifications
 TELEGRAM_BOT_TOKEN=your_bot_token
-# Note: Multi-user config in users.yaml
 
-# Scraper Credentials
+# Scraper credentials
 LOGIN_EMAIL=your_email
 LOGIN_PASSWORD=your_password
 ```
 
-### Health Checks
-
-All services include health checks:
+Optional (set automatically by docker-compose):
 
 ```bash
-# API health
-curl http://localhost:8000/health
-
-# Database health
-docker-compose exec db pg_isready
-
-# Redis health
-docker-compose exec redis redis-cli ping
+REDIS_URL=redis://redis:6379/0
+OTLP_ENDPOINT=http://tempo:4317   # set on api, conductor, alert-processor, notification-sender
 ```
-
-See [Deployment Guide](docs/guides/deployment.md) for production best practices.
 
 ---
 
-## 🔧 Troubleshooting
+## Deployment
 
-### Common Issues
-
-**Services not starting:**
 ```bash
-# Check logs
-docker-compose logs <service-name>
-
-# Restart specific service
-docker-compose restart <service-name>
-
-# Full restart
-docker-compose down && docker-compose up -d
-```
-
-**Database connection errors:**
-```bash
-# Wait for DB health check
-docker-compose up -d db
-# Wait 10 seconds for health check to pass
-docker-compose up -d api
-```
-
-**Queue not processing:**
-```bash
-# Monitor queue status
-python scripts/redis_monitor.py
-
-# Check processor logs
-docker-compose logs -f alert_processor
-```
-
-**Complete reset (⚠️ backs up data first):**
-```bash
-# Stop all services and remove volumes
-docker-compose down -v
-
-# Rebuild and restart
+# Build and start the full stack
 docker-compose up -d --build
+
+# The conductor manages collection windows automatically
+# Check conductor logs to confirm slot timing
+docker logs -f conductor
+
+# Trace a collection cycle in Grafana
+# open http://localhost:3000 → Explore → Tempo → service.name = "conductor"
 ```
 
-See [Troubleshooting Guide](docs/guides/troubleshooting.md) for detailed solutions.
+---
+
+## Roadmap
+
+- [x] Guardian state machine (Layer 1)
+- [x] Conductor container lifecycle (Layer 2)
+- [x] OpenTelemetry distributed tracing (Layer 3)
+- [ ] Prometheus custom metrics on vtrack — `vtrack_collection_total`, `vtrack_guardian_state`
+- [ ] Grafana alert rules — alert on missed slots and slow collections (Layer 4)
+- [ ] Deprecate `alert.severity` from domain model and Redis message schema
+- [ ] WebSocket API for real-time dashboard
+- [ ] Kubernetes deployment manifests
 
 ---
 
-## 🎯 Technical Achievements
-
-### Performance
-- ⚡ **500+ coordinates/min** processing throughput
-- ⏱️ **<100ms** geofence detection latency
-- 📊 **1000+ msgs/sec** queue throughput
-- 💾 **Batch inserts** reduce DB load by 60%
-
-### Reliability
-- 🔄 **Automatic retries** on queue failures
-- 🏥 **Health checks** for all services
-- 🛡️ **Graceful shutdown** with signal handlers
-- 📝 **Structured logging** for debugging
-
-### Code Quality
-- ✅ **Type hints** throughout codebase
-- 📚 **Comprehensive docstrings**
-- 🧪 **90%+ test coverage**
-- 🎨 **SOLID principles** applied
-
----
-
-## 📈 Roadmap
-
-- [ ] **WebSocket API** for real-time dashboard
-- [ ] **Grafana dashboards** for metrics visualization
-- [ ] **Kubernetes deployment** manifests
-- [ ] **GraphQL API** alternative
-- [ ] **Machine learning** route prediction
-- [ ] **Mobile app** integration
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
----
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 👤 Author
+## Author
 
 **Jose C**
+
 - GitHub: [@josec-bckdev](https://github.com/josec-bckdev)
 - LinkedIn: [Jose C](https://linkedin.com/in/yourprofile)
 - Portfolio: [VTrack Project](https://github.com/josec-bckdev/vtrack)
 
 ---
 
-## 🙏 Acknowledgments
-
-- Built as a portfolio project to demonstrate modern Python backend development
-- Inspired by real-world vehicle tracking challenges
-- Thanks to the FastAPI, Redis, and PostgreSQL communities
-
----
-
-<p align="center">
-  <strong>⭐ Star this repo if you found it helpful!</strong><br>
-  <sub>Built with ❤️ using Python, FastAPI, Redis, and Docker</sub>
-</p>
-
----
-
-**Version:** 1.0.0  
-**Last Updated:** February 2026  
-**Status:** Production Ready ✅
+**Version:** 2.0.0 (Layer 3 — OTel complete)
+**Last Updated:** May 2026
+**Status:** Production Ready

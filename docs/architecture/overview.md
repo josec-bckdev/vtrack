@@ -1,363 +1,267 @@
-# VTrack Architecture Overview - Complete Picture
+# VTrack — Architecture Overview
 
-## 🏗️ System Architecture
+## Services at a glance
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          DOCKER COMPOSE ORCHESTRATION                        │
-│                                                                               │
-│  ┌────────────────────────┐  ┌────────────────────────┐  ┌───────────────┐ │
-│  │   Container: fastapi_api│  │ Container: alert_processor│ │ Container:  │ │
-│  │   Image: custom         │  │ Image: custom           │  │ redis:7     │ │
-│  │   Port: 8000           │  │ No exposed ports        │  │ Port: 6379  │ │
-│  │                         │  │                         │  │             │ │
-│  │  ┌─────────────────┐   │  │  ┌─────────────────┐   │  │  ┌────────┐ │ │
-│  │  │ app/main.py     │   │  │  │ main.py         │   │  │  │ Redis  │ │ │
-│  │  │ FastAPI app     │   │  │  │ AlertConsumer   │   │  │  │ Server │ │ │
-│  │  └────────┬────────┘   │  │  └────────┬────────┘   │  │  └───┬────┘ │ │
-│  │           │             │  │           │             │  │      │      │ │
-│  │  ┌────────▼────────┐   │  │  ┌────────▼────────┐   │  │  ┌───▼────┐ │ │
-│  │  │scraper_async.py │   │  │  │shared/          │   │  │  │ Lists: │ │ │
-│  │  │Data collector   │   │  │  │message_queue.py │   │  │  │- coord │ │ │
-│  │  └────────┬────────┘   │  │  │location_alerts  │   │  │  │- alert │ │ │
-│  │           │             │  │  └────────┬────────┘   │  │  └───▲────┘ │ │
-│  │  ┌────────▼────────┐   │  │           │             │  │      │      │ │
-│  │  │shared/          │   │  │           │             │  │      │      │ │
-│  │  │message_queue.py │   │  │           │             │  │      │      │ │
-│  │  └────────┬────────┘   │  │           │             │  │      │      │ │
-│  │           │             │  │           │             │  │      │      │ │
-│  │           │ LPUSH       │  │           │ RPOP        │  │      │      │ │
-│  │           └─────────────┼──┼───────────┴─────────────┼──┼──────┘      │ │
-│  │                         │  │                         │  │             │ │
-│  └─────────────────────────┘  └─────────────────────────┘  └─────────────┘ │
-│            ▲                              │                       ▲          │
-│            │ HTTP requests                │ Reads from            │          │
-│            │ Port 8000                    │ coordinate_queue      │          │
-│            │                              │ Writes to alert_queue │          │
-└────────────┼──────────────────────────────┼───────────────────────┼──────────┘
-             │                              │                       │
-             │                              │                       │
-  ┌──────────▼───────┐         ┌───────────▼────────┐    ┌────────▼────────┐
-  │   User/Client    │         │  Geofence Logic    │    │  Your Dev Tools │
-  │                  │         │  ┌──────────────┐  │    │  ┌────────────┐ │
-   │  curl/browser    │         │  │ Boyaca       │  │    │  │redis_      │ │
-   │  /collection/    │         │  │ (4.742, -74.06)│ │    │  │monitor.py  │ │
-   │  start           │         │  │ radius: 1600m│  │    │  └────────────┘ │
-   └──────────────────┘         │  └──────────────┘  │    │  ┌────────────┐ │
-                                                │  ┌──────────────┐  │    │  │test_alert_ │ │
-                                                │  │Prado Zone   │  │    │  │processor.py│ │
-                                                │  │(4.718, -74.06)│ │    │  └────────────┘ │
-                                                │  │radius: 1200m│  │    │  ┌────────────┐ │
-                                                │  └──────────────┘  │    │  │redis-cli   │ │
-                                └────────────────────┘    └─────────────────┘
+| Container | `restart` | Role |
+| --- | --- | --- |
+| `conductor` | `always` | Owns container lifecycle; never stops |
+| `api` (fastapi_api) | `no` | vtrack FastAPI app — collection, guardian, cookie refresh |
+| `db` (postgres_db) | `no` | PostgreSQL — persistent coordinate and task storage |
+| `redis` (redis_queue) | `no` | Redis — `coordinate_queue` and `alert_queue` FIFO lists |
+| `alert-processor` | `no` | Geofence detection — pops coordinates, pushes alerts |
+| `notification-sender` | `no` | Telegram delivery — pops alerts, sends messages |
+| `tempo` | `no` | Grafana Tempo — OTLP gRPC receiver + trace storage |
+| `prometheus` | `no` | Prometheus — scrapes vtrack `/metrics` |
+| `grafana` | `no` | Grafana — traces (Tempo) + metrics (Prometheus) dashboards |
+
+The five managed services (`api`, `db`, `redis`, `alert-processor`, `notification-sender`) are started and stopped by the conductor around two daily collection windows. Observability services run independently.
+
+---
+
+## Container lifecycle (conductor)
+
+The conductor is the always-on orchestrator. It runs a ReAct loop that owns every transition:
+
+```text
+On conductor startup
+  ├── inside a collection window?
+  │     yes → _startup_slot (start stack, health wait, activate guardian)
+  │     no  → stop any managed containers that are running
+  └── enter main loop
+
+Main loop (per slot)
+  sleep until window_open
+  │
+  ├── conductor.container.start   start all 5 managed containers
+  ├── conductor.health.wait       poll GET /monitor/health until 200
+  ├── conductor.guardian.activate POST /monitor/guardian/activate  ← traceparent injected here
+  ├── conductor.resource.eval     query Docker stats for all containers
+  └── conductor.slot.watch        poll GET /monitor/guardian every 30 s
+        │                           until task_running == false
+        │
+        └── (optional) stop all managed containers if memory > threshold
 ```
 
-## 🔄 Data Flow - Complete Cycle
+**Slot windows (America/Bogota):**
 
-### Phase 1: Data Collection (Producer)
+| Slot | Opens | Closes |
+| --- | --- | --- |
+| morning | 05:00 | 06:40 |
+| afternoon | 14:30 | 16:30 |
 
-```
-1. User triggers: curl -X POST http://localhost:8000/collection/start
-                       ↓
-2. FastAPI endpoint: POST /collection/start
-                       ↓
-3. scraper_async.py: AsyncCollectionManager.start_collection()
-                       ↓
-4. Polls remote API every 15 seconds
-                       ↓
-5. For each coordinate:
-   - Save to PostgreSQL
-   - Push to Redis: message_queue.push_coordinate()
-                       ↓
-6. Redis: LPUSH coordinate_queue <json_data>
-```
+---
 
-### Phase 2: Queue Storage (Redis)
+## Guardian state machine (vtrack)
 
-```
-Redis List: coordinate_queue
+Inside the vtrack process, `app/scheduler.py` runs one `_watch_slot` coroutine per slot. It is a state machine that fires collection within the window:
 
-[newest] ← LPUSH adds here
-   │
-   ├── {"ruta": 103, "lat": 4.72, "lon": -74.01, "queued_at": "..."}
-   │
-   ├── {"ruta": 102, "lat": 4.71, "lon": -74.00, "queued_at": "..."}
-   │
-   ├── {"ruta": 101, "lat": 4.70, "lon": -73.99, "queued_at": "..."}
-   │
-[oldest] ← RPOP removes from here
+```text
+IDLE
+  │  clock reaches window_open
+  ▼
+WATCHING
+  │  poll every 30 s
+  ├── already_running?    → STARTED  (guardian.collection.start trigger=already_running)
+  └── grace_period ends?  → start()  → STARTED  (trigger=grace_exceeded)
+
+STARTED  ←─ set when collection.run span ends
+MISSED   ←─ set when window closes with no collection started
 ```
 
-### Phase 3: Processing (Consumer)
+Guardian state is exposed on `GET /monitor/guardian` (polled by conductor) and activated via `POST /monitor/guardian/activate`.
 
-```
-1. alert-processor main.py runs: while True
-                       ↓
-2. Poll Redis: coordinate = redis.rpop('coordinate_queue')
-                       ↓
-3. If coordinate exists:
-   - Extract: ruta, latitude, longitude
-                       ↓
-4. LocationAnalyzer.analyze_coordinate(ruta, lat, lon)
-   - Check against all zones
-   - Compare with previous position (tracking_state)
-   - Detect entry/exit events
-                       ↓
-5. If zone entry/exit detected:
-   - Create LocationAlert object
-                       ↓
-6. Push alert: message_queue.push_alert()
-                       ↓
-7. Redis: LPUSH alert_queue <alert_json>
-                       ↓
-8. Sleep 1 second, loop back to step 1
-```
+---
 
-### Phase 4: Alert Storage (Redis)
+## Data flow
 
-```
-Redis List: alert_queue
+### Collection cycle
 
-[newest] ← LPUSH adds here
-   │
-   ├── {"ruta": 101, "alert_type": "GEOFENCE_ENTRY", "area": "Boyaca", ...}
-   │
-   ├── {"ruta": 102, "alert_type": "GEOFENCE_EXIT", "area": "Depot", ...}
-   │
-[oldest] ← Ready for downstream processing (future: notifications, dashboard, etc.)
+```text
+1.  Conductor activates guardian via HTTP (W3C traceparent header injected)
+2.  Guardian fires collection — AsyncCollectionManager.start()
+3.  Collection loop polls remote GPS API every ~15 s
+4.  For each coordinate batch:
+      a. Normalize and persist to PostgreSQL (RouteDataEntry)
+      b. Push to Redis: LPUSH coordinate_queue <json>
+5.  alert-processor polls: RPOP coordinate_queue
+6.  LocationAnalyzer checks coordinate against all zones
+7.  On geofence entry/exit: push to Redis: LPUSH alert_queue <json>
+8.  notification-sender polls: RPOP alert_queue
+9.  TelegramNotifier.send_alert() → Telegram Bot API → users
+10. Collection stops (manually or on scraper logic) — AsyncCollectionManager.stop()
+    → collection.run span ends with datapoints + duration_s attributes
 ```
 
-## 🎯 Key Components Explained
+### Cookie refresh (inside vtrack)
 
-### 1. FastAPI Container (Producer)
-**Purpose:** Main application, data collection
-**Runs:** `python -m uvicorn app.main:app --reload`
-**Key Files:**
-- `app/main.py` - FastAPI routes
-- `app/scraper_async.py` - Collects coordinates from remote API
-- `app/models.py` - Database models
-- `shared/message_queue.py` - Redis client
+When the scraper session expires, `cookie_refresh.run` fires inside the `collection.run` trace:
 
-**Docker Settings:**
-```yaml
-restart: always              # Auto-restart on failure
-ports: ["8000:8000"]        # Expose HTTP API
-volumes:                     # Hot reload enabled
-  - ./app:/app/app
-  - ./shared-package:/app/shared-package
-depends_on: [db, redis]     # Wait for dependencies
+```text
+collection.run span (open)
+  └── cookie_refresh.run span
+        FileProgrammedScriptStore loads steps
+        VncBrowserGateway executes login steps inside VNC container
+        DirectVtrackGateway pushes extracted cookies to /session/set-cookies
+        span.set_attribute("refresh.success", result.success)
+        span.set_attribute("refresh.steps_taken", result.steps_taken)
 ```
 
-### 2. Alert Processor Container (Consumer)
-**Purpose:** Process coordinates, generate geofence alerts
-**Runs:** `python main.py`
-**Key Files:**
-- `microservices/alert-processor/main.py` - Consumer loop
-- `shared/message_queue.py` - Redis client
-- `shared/location_alerts.py` - Geofence logic
+---
 
-**Docker Settings:**
-```yaml
-restart: always              # Auto-restart on failure
-depends_on: [redis]          # Only needs Redis
-environment:
-  REDIS_URL: redis://redis:6379/0
-  PYTHONUNBUFFERED: 1        # Real-time logging
+## Distributed trace topology
+
+```text
+[conductor]
+  conductor.slot                    {slot.name, slot.date}
+    ├── conductor.container.start   {containers.count}
+    ├── conductor.health.wait
+    ├── conductor.guardian.activate {slot.name}    ← W3C traceparent injected via httpx
+    ├── conductor.resource.eval     {resource.total_memory_mb, resource.decision}
+    └── conductor.slot.watch        {slot.outcome}
+
+[vtrack — same trace, continued from traceparent header]
+  guardian.slot.{name}              {slot.name}
+    ├── guardian.watching
+    └── guardian.collection.start   {trigger}
+          collection.run            {collection.task_id, collection.datapoints,
+                                     collection.duration_s}
+            └── cookie_refresh.run  {refresh.success, refresh.steps_taken}
+
+[alert-processor — independent root span, correlate by slot.date in Grafana]
+  alert_processor.coordinate.process  {coordinate.ruta, coordinate.latitude,
+                                        coordinate.longitude, alerts.generated}
+    └── alert_processor.alert.queue   {alert.type, alert.zone}
+
+[notification-sender — independent root span, correlate by alert.ruta + alert.type]
+  notification_sender.alert.send      {alert.ruta, alert.type,
+                                        notification.provider, notification.success}
 ```
 
-### 3. Redis Container (Message Broker)
-**Purpose:** Queue coordination between producer and consumer
-**Runs:** `redis-server`
-**Data Structures:**
-- `coordinate_queue` - LIST (FIFO)
-- `alert_queue` - LIST (FIFO)
+Conductor → vtrack: W3C `traceparent` header injected by `AsyncOpenTelemetryTransport` (httpx); extracted automatically by `opentelemetry-instrumentation-fastapi`.
 
-**Docker Settings:**
-```yaml
-image: redis:7-alpine        # Lightweight Redis
-ports: ["6379:6379"]         # Expose for monitoring
-volumes:
-  - redis_data:/data         # Persistent storage
+Alert-processor and notification-sender do not receive HTTP requests during normal operation, so they emit independent root spans. Correlate them in Grafana by filtering on `slot.date`.
+
+---
+
+## Clean Architecture layers
+
+Every bounded context follows the same dependency rule — inner layers never import from outer layers:
+
+```text
+infrastructure (main.py, Dockerfile)
+      │
+  adapters/ (tracing.py, vtrack_gateway.py, route_repository.py, …)
+      │
+  application/ (conductor.py, scheduler.py, scraper_async.py, AlertConsumer, …)
+      │
+   domain/ (ports.py, resource_policy.py, scraper.py)
 ```
 
-### 4. PostgreSQL Container (Not Shown in Queue Flow)
-**Purpose:** Persistent storage for coordinates
-**Stores:** Historical coordinate data, route information
+**OTel placement rule:**
 
-### 5. Shared Package
-**Purpose:** Code reuse across services
-**Contains:**
-- `message_queue.py` - Redis operations (push/pop)
-- `location_alerts.py` - Geofence logic, Zone definitions, AlertTypes
+| Layer | Allowed |
+| --- | --- |
+| `domain/` | nothing |
+| `application/` | `from opentelemetry import trace` — API only (no SDK) |
+| `adapters/tracing.py` | SDK + OTLP exporter — `configure_tracing()` only |
+| `infrastructure/main.py` | calls `configure_tracing(service_name, endpoint)` |
 
-**Installed in both containers during build:**
-```dockerfile
-COPY shared-package /app/shared-package
-RUN pip install /app/shared-package
+This means all application-layer code is a zero-cost no-op when no provider is configured, and all tests that don't need spans never touch the SDK.
+
+---
+
+## Port and adapter inventory
+
+### vtrack (`app/domain/ports.py`)
+
+| Port | Adapter | Purpose |
+| --- | --- | --- |
+| `IRouteDataRepository` | `SqlAlchemyRouteRepository` | DB persistence for collection tasks and route entries |
+| `ICollectionStateStore` | `InMemoryCollectionState` | In-process state (status, counters, deduplication hash) |
+| `ICollectionStatusAdapter` | `AsyncCollectionManagerAdapter` | Narrow bridge: guardian → collection manager |
+
+### conductor (`microservices/conductor/domain/ports.py`)
+
+| Port | Adapter | Purpose |
+| --- | --- | --- |
+| `IVtrackGateway` | `HttpxVtrackGateway` | HTTP calls to vtrack `/monitor/*` endpoints |
+| `IContainerGateway` | `DockerContainerGateway` | Docker container start/stop/stats via Docker SDK |
+
+---
+
+## Redis message schema
+
+### `coordinate_queue` (FIFO — LPUSH / RPOP)
+
+```json
+{
+  "ruta": 101,
+  "latitude": 4.7110,
+  "longitude": -74.0059,
+  "position_ts": "2026-05-19T05:30:00-05:00",
+  "route_status": "En recorrido",
+  "queued_at": "2026-05-19T05:30:01-05:00"
+}
 ```
 
-## 🔧 Development Tools You Have
+### `alert_queue` (FIFO — LPUSH / RPOP)
 
-### Monitoring Tools
-```bash
-# 1. Redis queue monitor (visual)
-python redis_monitor.py --interval 1
-
-# 2. Redis CLI (direct access)
-docker exec -it redis_queue redis-cli
-
-# 3. Container logs
-docker logs -f alert_processor
-docker logs -f fastapi_api
+```json
+{
+  "ruta": 101,
+  "latitude": 4.7110,
+  "longitude": -74.0059,
+  "alert_type": "GEOFENCE_ENTRY",
+  "area_name": "North Terminal",
+  "severity": "WARNING",
+  "timestamp": "2026-05-19T05:31:00-05:00"
+}
 ```
 
-### Testing Tools
-```bash
-# 1. Test alert processor
-python test_alert_processor.py --scenario zone
+> **Note:** `severity` is scheduled for deprecation. It is already omitted from all OTel span attributes.
 
-# 2. Manual coordinate push
-docker exec redis_queue redis-cli LPUSH coordinate_queue '{...}'
+---
 
-# 3. Load testing
-python test_alert_processor.py --load 1000
-```
+## Health checks
 
-### Development Tools
-```bash
-# 1. Hot reload mode
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+| Service | Check |
+| --- | --- |
+| `db` | `pg_isready -U $POSTGRES_USER -d $POSTGRES_DB` |
+| `redis` | `redis-cli ping` |
+| `api` | `GET /monitor/health` → 200 (polled by conductor) |
+| `alert-processor` | log output + queue statistics |
+| `notification-sender` | log output |
 
-# 2. Quick restart
-docker restart alert_processor
+---
 
-# 3. Rebuild after changes
-docker-compose build alert-processor
-```
+## Startup sequence
 
-## 🚀 Startup Sequence
-
-When you run `docker-compose up`:
-
-```
-1. Networks created: vtrack-network (bridge)
-2. Volumes created: postgres_data, redis_data, pgadmin_data
-3. Containers start in dependency order:
-
-   Start: redis (no dependencies)
-   ├─ Health check: redis-cli ping
-   └─ ✓ Ready
-
-   Start: db/postgres (no dependencies)
-   ├─ Health check: pg_isready
-   └─ ✓ Ready
-
-   Start: migrate (depends on db)
-   ├─ Wait for db health check
-   ├─ Run: alembic upgrade head
-   └─ ✓ Exit (one-time migration)
-
-   Start: api (depends on db, redis)
-   ├─ Wait for db & redis health checks
-   ├─ Run: uvicorn app.main:app
-   └─ ✓ Listening on :8000
-
-   Start: alert-processor (depends on redis)
-   ├─ Wait for redis health check
-   ├─ Run: python main.py
-   ├─ Connect to Redis
-   ├─ Initialize LocationAnalyzer
-   └─ ✓ Start consuming loop
-
-   Start: pgadmin (depends on db)
-   └─ ✓ Admin interface on :8080
-```
-
-## 💡 Independence and Failure Handling
-
-### Scenario 1: Alert Processor Crashes
-```
-FastAPI (still running) → Redis (queuing) → Alert Processor (CRASHED ❌)
-                           ↓
-                     Coordinates pile up in Redis
-                           ↓
-                     Docker restarts alert-processor (restart: always)
-                           ↓
-                     Alert Processor processes backlog
-                           ✓ No data lost!
-```
-
-### Scenario 2: Redis Crashes
-```
-FastAPI → Redis (CRASHED ❌) ← Alert Processor
-   ↓                              ↓
-Coordinates saved to DB     Waiting, will retry
-   ✓ Data safe!             ✓ Will reconnect!
-
-Docker restarts Redis (restart: always)
-   ↓
-Both services reconnect automatically
-   ✓ System resumes!
-```
-
-### Scenario 3: You Stop Alert Processor for Development
-```
-FastAPI → Redis → Alert Processor (STOPPED ⏸️ by you)
-   ↓         ↓
-   ✓      Coordinates queue up
-
-You make changes, restart:
-   ↓
-Alert Processor → Processes entire backlog
-   ✓ Caught up!
-```
-
-## 🎓 Key Architectural Decisions
-
-1. **Why Redis Lists instead of Pub/Sub?**
-   - Persistence: Messages stay in queue even if consumer is down
-   - Simplicity: LPUSH/RPOP is easy to understand
-   - Backlog: Can see queue size and items
-   - Multiple consumers: Can scale by adding more consumers
-
-2. **Why Separate Containers?**
-   - Independence: Restart one without affecting others
-   - Scalability: Can run multiple alert-processors
-   - Development: Test each component independently
-   - Deployment: Deploy updates without downtime
-
-3. **Why Shared Package?**
-   - DRY: Single source of truth for common code
-   - Consistency: Same geofence logic everywhere
-   - Updates: Change once, affects all services
-
-4. **Why Docker Compose?**
-   - Orchestration: Manages multiple services
-   - Networking: Automatic service discovery
-   - Dependencies: Handles startup order
-   - Development: Matches production closely
-
-## 📚 Documentation Map
-
-```
-├─ ARCHITECTURE_OVERVIEW.md (this file) ← Start here
+```text
+docker-compose up -d
 │
-├─ REDIS_QUEUE_GUIDE.md ─── Redis internals, queue operations
-│  └─ REDIS_QUICK_REFERENCE.md ─── Quick command reference
-│
-├─ ALERT_PROCESSOR_GUIDE.md ─── Consumer deep dive
-│  └─ DEV_WORKFLOW.md ─── Development workflows
-│
-├─ redis_monitor.py ─── Monitoring tool
-└─ test_alert_processor.py ─── Testing tool
+├── tempo, prometheus, grafana start (no dependencies)
+├── redis starts → health check passes
+├── db starts → health check passes
+└── conductor starts (restart: always)
+      │
+      ├── if inside window: _startup_slot → start api, db, redis, alert-processor, notification-sender
+      └── if outside window: stop any managed containers already running
 ```
 
-## 🎯 Next Steps
+The managed services are **not** started by `docker-compose up` directly — they start when conductor decides the time is right. Set `restart: "no"` on all five so Docker never auto-restarts them outside conductor's control.
 
-1. **Understand the flow** - Read this diagram thoroughly
-2. **Test it** - Use `test_alert_processor.py --scenario zone`
-3. **Monitor it** - Run `python redis_monitor.py`
-4. **Modify it** - Follow `DEV_WORKFLOW.md`
-5. **Deploy it** - Use existing `docker-compose up`
+---
 
-**You now have a complete understanding of the VTrack microservices architecture!** 🎉
+## Key architectural decisions
+
+**Why conductor instead of cron or `restart: always` on managed services?**
+The collection window is narrow (90 minutes, twice a day). Running PostgreSQL, Redis, and two worker services 24/7 wastes resources and increases failure surface. The conductor gives fine-grained start/stop control, includes a memory-threshold gate, and emits a full OTel trace for every slot.
+
+**Why Redis Lists instead of Pub/Sub?**
+Lists persist messages when the consumer is down. Queue backlog is inspectable (`LRANGE`), recoverable, and trivially scalable (add more consumers). Pub/Sub would drop messages if the consumer missed the window.
+
+**Why independent root spans for alert-processor and notification-sender?**
+These services consume from Redis queues; there is no HTTP call that carries a `traceparent` header. Modifying the Redis message schema to include a trace context would couple tracing concerns into the domain model. Independent spans correlated by `slot.date` in Grafana is a cleaner separation.
+
+**Why `opentelemetry-api` only in application layers?**
+The API package is a pure façade — it is a no-op when no provider is configured. This keeps unit tests fast (no SDK overhead) and keeps the SDK out of domain and application code, which should not know about infrastructure concerns like exporters or batch processors.
