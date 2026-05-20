@@ -69,6 +69,9 @@ class TestCollectionStatusAdapterPortContract:
             async def start(self) -> None:
                 pass
 
+            def datapoints_collected(self) -> int:
+                return 0
+
         adapter = ConcreteAdapter()
         assert adapter is not None
 
