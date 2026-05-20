@@ -127,3 +127,27 @@ class TestMonitorGuardianActivate:
                    side_effect=RuntimeError("morning guardian already active")):
             response = test_client.post("/monitor/guardian/activate?slot=morning")
         assert response.status_code == 409
+
+
+# =============================================================================
+# /metrics  (Prometheus)
+# =============================================================================
+
+class TestPrometheusMetrics:
+
+    def test_metrics_endpoint_returns_200(self, test_client):
+        response = test_client.get("/metrics")
+        assert response.status_code == 200
+
+    def test_metrics_content_type_is_plaintext(self, test_client):
+        response = test_client.get("/metrics")
+        assert response.headers["content-type"].startswith("text/plain")
+
+    def test_metrics_body_contains_prometheus_type_lines(self, test_client):
+        response = test_client.get("/metrics")
+        assert "# TYPE" in response.text
+
+    def test_metrics_exposes_http_request_counter(self, test_client):
+        test_client.get("/monitor/health")
+        response = test_client.get("/metrics")
+        assert "http_requests_total" in response.text
