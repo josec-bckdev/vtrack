@@ -14,6 +14,8 @@ from app.config import load_schedule_config
 from app.scheduler import Scheduler
 from shared.message_queue import MessageQueue
 
+from prometheus_fastapi_instrumentator import Instrumentator
+
 from app.cookie_refresh import run_refresh
 from app import monitoring as _monitoring
 from app.tracing import configure_tracing
@@ -70,6 +72,8 @@ app = FastAPI(lifespan=lifespan)
 
 app.include_router(data_server_router, prefix="/data", tags=["data"])
 app.include_router(_monitoring.router)
+
+Instrumentator().instrument(app).expose(app)
 
 
 @app.get("/health")
