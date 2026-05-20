@@ -7,22 +7,16 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy shared package
-COPY shared-package /app/shared-package
+# Install requirements (before copying code for better layer caching)
+COPY microservices/alert-processor/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install shared package
+# Copy shared package and install
+COPY shared-package /app/shared-package
 RUN pip install --no-cache-dir /app/shared-package
 
-# Copy alert processor
+# Copy alert processor code
 COPY microservices/alert-processor /app
-
-# Install requirements
-RUN pip install --no-cache-dir \
-    redis \
-    rq \
-    geopy \
-    pyyaml \
-    debugpy
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
