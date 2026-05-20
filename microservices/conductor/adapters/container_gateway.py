@@ -25,25 +25,31 @@ def _sync_is_running(name: str) -> bool:
 
 
 def _sync_start(name: str) -> None:
-    client = _get_client()
-    container = client.containers.get(name)
-    container.reload()
-    if container.status != "running":
-        container.start()
-        logger.info("Started container %s", name)
-    else:
-        logger.debug("Container %s already running, skipping start", name)
+    try:
+        client = _get_client()
+        container = client.containers.get(name)
+        container.reload()
+        if container.status != "running":
+            container.start()
+            logger.info("Started container %s", name)
+        else:
+            logger.debug("Container %s already running, skipping start", name)
+    except docker.errors.NotFound:
+        logger.debug("Container %s not found, skipping start", name)
 
 
 def _sync_stop(name: str) -> None:
-    client = _get_client()
-    container = client.containers.get(name)
-    container.reload()
-    if container.status == "running":
-        container.stop()
-        logger.info("Stopped container %s", name)
-    else:
-        logger.debug("Container %s not running, skipping stop", name)
+    try:
+        client = _get_client()
+        container = client.containers.get(name)
+        container.reload()
+        if container.status == "running":
+            container.stop()
+            logger.info("Stopped container %s", name)
+        else:
+            logger.debug("Container %s not running, skipping stop", name)
+    except docker.errors.NotFound:
+        logger.debug("Container %s not found, skipping stop", name)
 
 
 def _sync_get_stats(name: str) -> ContainerStats:
