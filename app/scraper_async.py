@@ -23,6 +23,7 @@ from app.domain.scraper import (
 from opentelemetry import trace
 
 from app.domain.ports import ICollectionStateStore, IRouteDataRepository
+from app.metrics import collection_datapoints
 from shared.message_queue import MessageQueue
 
 # Setup logging
@@ -59,6 +60,7 @@ class AsyncCollectionManager:
         self._task: asyncio.Task | None = None
         self._is_running = False
         self._lock = asyncio.Lock()
+        self._slot: str = "unknown"
         self.message_queue: Optional[MessageQueue] = message_queue
 
         # Session management
@@ -396,6 +398,7 @@ class AsyncCollectionManager:
                     logger.warning(f"Error closing httpx client: {e}")
                 self._client = None
 
+        collection_datapoints.labels(slot=self._slot).observe(self.datapoints_collected)
         logger.info("Collection manager stopped")
         return True
 
