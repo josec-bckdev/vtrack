@@ -6,6 +6,26 @@ Verify that:
   - vtrack_collection_datapoints{slot}         observes datapoints in AsyncCollectionManager.stop()
 
 Fails until app/metrics.py is created and the scheduler/scraper are instrumented.
+
+Why tests that freeze time before window_close hung (same root cause as
+test_guardian_otel.py) and how _fast_scheduler_clock fixes them
+-----------------------------------------------------------------------
+_watch_slot has a collection-running loop that sleeps asyncio.sleep(30)
+each iteration and exits only when (a) time >= window_close_dt or (b)
+not is_running().  With a frozen clock before window_close and a mock
+adapter that always returns is_running()=True the loop never exits.
+
+_fast_scheduler_clock (autouse fixture) patches asyncio.sleep with a
+side_effect that mutates app.scheduler.datetime.now.return_value to
+_PAST_ALL_WINDOWS (07:00).  On the next iteration the window-close check
+is True and _watch_slot returns STARTED (datapoints_collected()=1 > 0).
+
+test_state_watching_is_set_to_one overrides the sleep patch internally
+with AsyncMock, so it exits loop-2 via is_running() exhausting its
+side_effect list [False, True, False] rather than via the clock advance.
+Three values are required: call-1 (watching-loop: not yet running),
+call-2 (watching-loop: now running → break), call-3 (collection-running
+loop: finished → not running → break).
 """
 import asyncio
 import pytest
@@ -13,6 +33,7 @@ from datetime import datetime, time
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import app.scheduler as _scheduler_mod
 from prometheus_client import REGISTRY
 
 from app.config import JobSlot
@@ -21,6 +42,24 @@ from app.scraper_async import AsyncCollectionManager
 
 
 TZ = ZoneInfo("America/Bogota")
+
+# Sentinel time well past any window_close used in this file.
+_PAST_ALL_WINDOWS = datetime(2026, 5, 20, 7, 0, tzinfo=TZ)
+
+
+@pytest.fixture(autouse=True)
+def _fast_scheduler_clock():
+    """Patch asyncio.sleep so it advances the frozen scheduler clock past
+    window_close on first call.  Without this, _watch_slot's collection-running
+    loop (scheduler.py lines ~271-279) never exits when is_running()=True and
+    time is frozen before window_close, hanging the test indefinitely."""
+    async def _advance(*_a, **_kw):
+        dt = getattr(_scheduler_mod, "datetime", None)
+        if dt is not None and hasattr(dt.now, "return_value"):
+            dt.now.return_value = _PAST_ALL_WINDOWS
+
+    with patch("asyncio.sleep", side_effect=_advance):
+        yield
 
 # Unique slot prefixes per class keep counters isolated across test runs
 # (Prometheus counters accumulate within a process — unique labels avoid overlap)
@@ -50,6 +89,7 @@ def _make_adapter(*, running=False):
     adapter = MagicMock()
     adapter.is_running.return_value = running
     adapter.start = AsyncMock()
+    adapter.datapoints_collected.return_value = 1
     return adapter
 
 
@@ -108,9 +148,12 @@ class TestGuardianStateGauge:
         slot = _make_slot()
         adapter = _make_adapter(running=False)
 
-        # Freeze before fire_time so the guardian enters WATCHING and then polls
-        # Make adapter.is_running flip to True on second call so it exits quickly
-        adapter.is_running.side_effect = [False, True]
+        # Freeze before fire_time so the guardian enters WATCHING and then polls.
+        # side_effect=[False, True, False]: call-1 (watching-loop, not running yet),
+        # call-2 (watching-loop again after sleep, now running → breaks watching loop),
+        # call-3 (collection-running loop: already done → not running → loop exits).
+        # Three calls are required because _watch_slot has two separate while-loops.
+        adapter.is_running.side_effect = [False, True, False]
         with _freeze(datetime(2026, 5, 20, 5, 10, tzinfo=TZ)):
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 await Scheduler()._watch_slot(slot, adapter, slot_name="gs_watching")
