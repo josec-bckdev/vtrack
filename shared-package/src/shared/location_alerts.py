@@ -24,12 +24,6 @@ class AlertType(str, Enum):
     HALT_ALERT = "HALT_ALERT"
     SLOW_SPEED = "SLOW_SPEED"
 
-class AlertSeverity(str, Enum):
-    """Alert severity levels."""
-    INFO = "INFO"
-    WARNING = "WARNING"
-    CRITICAL = "CRITICAL"
-
 @dataclass
 class Zone:
     """Represents a geographical zone/area for geofencing."""
@@ -39,7 +33,6 @@ class Zone:
     longitude: float
     radius_meters: float  # Radius of the zone in meters
     alert_type: AlertType = AlertType.GEOFENCE_ENTRY
-    severity: AlertSeverity = AlertSeverity.WARNING
     enabled: bool = True
     
     def is_within(self, lat: float, lon: float) -> bool:
@@ -70,7 +63,6 @@ class LocationAlert:
     longitude: float
     alert_type: AlertType
     zone_name: str
-    severity: AlertSeverity
     timestamp: datetime
     message: str = ""
 
@@ -106,7 +98,6 @@ class LocationAnalyzer:
                             longitude=zone_data['longitude'],
                             radius_meters=zone_data['radius_meters'],
                             alert_type=AlertType(zone_data.get('alert_type', 'GEOFENCE_ENTRY')),
-                            severity=AlertSeverity(zone_data.get('severity', 'WARNING')),
                             enabled=zone_data.get('enabled', True)
                         )
                         self.zones.append(zone)
@@ -179,7 +170,6 @@ class LocationAnalyzer:
                             longitude=longitude,
                             alert_type=zone.alert_type,
                             zone_name=zone.name,
-                            severity=zone.severity,
                             timestamp=datetime.now(ZoneInfo("America/Bogota")),
                             message=f"Route {ruta} entered {zone.name}"
                         )
@@ -201,7 +191,6 @@ class LocationAnalyzer:
                             longitude=longitude,
                             alert_type=AlertType.GEOFENCE_EXIT,
                             zone_name=zone.name,
-                            severity=zone.severity,
                             timestamp=datetime.now(ZoneInfo("America/Bogota")),
                             message=f"Route {ruta} exited {zone.name}"
                         )

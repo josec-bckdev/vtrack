@@ -26,7 +26,6 @@ from shared.location_alerts import (
     Zone,
     LocationAlert,
     AlertType,
-    AlertSeverity
 )
 
 
@@ -72,7 +71,6 @@ class TestZoneManagement:
             assert isinstance(zone.longitude, float)
             assert zone.radius_meters > 0
             assert isinstance(zone.alert_type, AlertType)
-            assert isinstance(zone.severity, AlertSeverity)
             assert zone.enabled is True
 
     def test_add_custom_zone_successfully(self, location_analyzer_fixture):
@@ -89,7 +87,6 @@ class TestZoneManagement:
             longitude=-74.0000,
             radius_meters=300,
             alert_type=AlertType.GEOFENCE_ENTRY,
-            severity=AlertSeverity.WARNING
         )
         
         initial_count = len(location_analyzer_fixture.get_zones())
@@ -447,37 +444,8 @@ class TestAlertGeneration:
         assert alert.longitude == entry_zone.longitude
         assert alert.alert_type == AlertType.GEOFENCE_ENTRY
         assert alert.zone_name == entry_zone.name
-        assert alert.severity == AlertSeverity.WARNING
         assert isinstance(alert.timestamp, datetime)
         assert alert.message != ""
-
-    def test_alert_severity_matches_zone_severity(self, location_analyzer_fixture):
-        """
-        ARRANGE: Zone with CRITICAL severity
-        ACT: Generate alert from that zone
-        ASSERT: Alert inherits zone's severity
-        """
-        # Arrange
-        critical_zone = Zone(
-            zone_id=88,
-            name="Critical Area",
-            latitude=4.6000,
-            longitude=-74.0000,
-            radius_meters=500,
-            alert_type=AlertType.GEOFENCE_ENTRY,
-            severity=AlertSeverity.CRITICAL
-        )
-        location_analyzer_fixture.add_zone(critical_zone)
-        
-        # Act
-        alerts = location_analyzer_fixture.analyze_coordinate(
-            ruta=101,
-            latitude=4.6000,
-            longitude=-74.0000
-        )
-        
-        # Assert
-        assert alerts[0].severity == AlertSeverity.CRITICAL
 
 
 class TestRouteStatusTracking:

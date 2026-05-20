@@ -473,8 +473,8 @@ def sample_zones():
 
     These represent the YAML-configured zones used by the application.
     """
-    from shared.location_alerts import Zone, AlertType, AlertSeverity
-    
+    from shared.location_alerts import Zone, AlertType
+
     return {
         'cota': Zone(
             zone_id=1,
@@ -483,7 +483,6 @@ def sample_zones():
             longitude=-74.07654149999999,
             radius_meters=1500,
             alert_type=AlertType.GEOFENCE_EXIT,
-            severity=AlertSeverity.WARNING,
             enabled=True
         ),
         'boyaca': Zone(
@@ -493,7 +492,6 @@ def sample_zones():
             longitude=-74.065845,
             radius_meters=1600,
             alert_type=AlertType.GEOFENCE_ENTRY,
-            severity=AlertSeverity.WARNING,
             enabled=True
         ),
         'prado': Zone(
@@ -503,7 +501,6 @@ def sample_zones():
             longitude=-74.062382,
             radius_meters=1200,
             alert_type=AlertType.GEOFENCE_ENTRY,
-            severity=AlertSeverity.WARNING,
             enabled=True
         ),
     }
