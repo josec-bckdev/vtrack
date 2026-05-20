@@ -80,18 +80,17 @@ class MessageQueue:
             return False
     
     def push_alert(self, ruta: int, latitude: float, longitude: float,
-                  alert_type: str, area_name: str, severity: str = "INFO") -> bool:
+                  alert_type: str, area_name: str) -> bool:
         """
         Push an alert to the alert queue.
-        
+
         Args:
             ruta: Route ID
             latitude: Location latitude
             longitude: Location longitude
             alert_type: Type of alert (e.g., "GEOFENCE", "SLOW_SPEED", "HALT")
             area_name: Name of the area where alert was triggered
-            severity: Alert severity level (INFO, WARNING, CRITICAL)
-            
+
         Returns:
             True if successfully queued, False otherwise
         """
@@ -102,7 +101,6 @@ class MessageQueue:
                 "longitude": longitude,
                 "alert_type": alert_type,
                 "area_name": area_name,
-                "severity": severity,
                 "timestamp": datetime.now(ZoneInfo("America/Bogota")).isoformat()
             }
             

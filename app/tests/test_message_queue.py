@@ -266,104 +266,55 @@ class TestAlertPushing:
         ACT: Push alert to queue
         ASSERT: Alert is successfully queued
         """
-        # Arrange
-        ruta = 101
-        latitude = 4.7110
-        longitude = -74.0059
-        alert_type = "GEOFENCE_ENTRY"
-        area_name = "School Zone"
-        severity = "INFO"
-        
         initial_length = message_queue_fixture.get_queue_length('alert_queue')
-        
-        # Act
+
         result = message_queue_fixture.push_alert(
-            ruta=ruta,
-            latitude=latitude,
-            longitude=longitude,
-            alert_type=alert_type,
-            area_name=area_name,
-            severity=severity
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059,
+            alert_type="GEOFENCE_ENTRY",
+            area_name="School Zone",
         )
-        
-        # Assert
+
         assert result is True
-        new_length = message_queue_fixture.get_queue_length('alert_queue')
-        assert new_length == initial_length + 1
+        assert message_queue_fixture.get_queue_length('alert_queue') == initial_length + 1
 
-    def test_push_alert_with_all_fields(self, message_queue_fixture):
-        """
-        ARRANGE: Alert with all fields
-        ACT: Push alert and pop it
-        ASSERT: All fields are preserved
-        """
-        # Arrange
-        alert_data = {
-            'ruta': 101,
-            'latitude': 4.7110,
-            'longitude': -74.0059,
-            'alert_type': 'GEOFENCE_ENTRY',
-            'area_name': 'School Zone',
-            'severity': 'WARNING'
-        }
-        
-        # Act
-        message_queue_fixture.push_alert(**alert_data)
-        popped = message_queue_fixture.pop_alert()
-        
-        # Assert
-        assert popped is not None
-        assert popped['ruta'] == alert_data['ruta']
-        assert popped['latitude'] == alert_data['latitude']
-        assert popped['longitude'] == alert_data['longitude']
-        assert popped['alert_type'] == alert_data['alert_type']
-        assert popped['area_name'] == alert_data['area_name']
-        assert popped['severity'] == alert_data['severity']
-
-    def test_push_alert_default_severity(self, message_queue_fixture):
-        """
-        ARRANGE: Alert without severity specified
-        ACT: Push alert with default severity
-        ASSERT: Defaults to "INFO"
-        """
-        # Act
+    def test_push_alert_payload_has_no_severity(self, message_queue_fixture):
+        """alert.severity was removed from the domain; queue payload must not include it."""
         message_queue_fixture.push_alert(
             ruta=101,
             latitude=4.7110,
             longitude=-74.0059,
             alert_type="GEOFENCE_ENTRY",
-            area_name="School Zone"
-            # severity not specified
+            area_name="School Zone",
         )
-        
-        popped = message_queue_fixture.pop_alert()
-        
-        # Assert
-        assert popped['severity'] == "INFO"
 
-    def test_push_alert_different_severity_levels(self, message_queue_fixture):
+        popped = message_queue_fixture.pop_alert()
+
+        assert popped is not None
+        assert "severity" not in popped
+
+    def test_push_alert_fields_preserved(self, message_queue_fixture):
         """
-        ARRANGE: Alerts with different severity levels
-        ACT: Push alerts with INFO, WARNING, CRITICAL
-        ASSERT: All severity levels are preserved
+        ARRANGE: Alert with all fields
+        ACT: Push alert and pop it
+        ASSERT: All fields are preserved
         """
-        # Arrange
-        severities = ["INFO", "WARNING", "CRITICAL"]
-        
-        for severity in severities:
-            message_queue_fixture.push_alert(
-                ruta=101,
-                latitude=4.7110,
-                longitude=-74.0059,
-                alert_type="GEOFENCE_ENTRY",
-                area_name="Zone",
-                severity=severity
-            )
-        
-        # Act & Assert
-        for severity in severities:
-            popped = message_queue_fixture.pop_alert()
-            assert popped['severity'] == severity
+        message_queue_fixture.push_alert(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059,
+            alert_type='GEOFENCE_ENTRY',
+            area_name='School Zone',
+        )
+        popped = message_queue_fixture.pop_alert()
+
+        assert popped is not None
+        assert popped['ruta'] == 101
+        assert popped['latitude'] == 4.7110
+        assert popped['longitude'] == -74.0059
+        assert popped['alert_type'] == 'GEOFENCE_ENTRY'
+        assert popped['area_name'] == 'School Zone'
 
 
 class TestAlertPopping:
@@ -400,7 +351,6 @@ class TestAlertPopping:
                 longitude=-74.0059,
                 alert_type="GEOFENCE_ENTRY",
                 area_name=area,
-                severity="WARNING"
             )
         
         # Act & Assert
@@ -448,7 +398,6 @@ class TestQueueLengthMonitoring:
                 longitude=-74.0059,
                 alert_type="GEOFENCE_ENTRY",
                 area_name=f"Zone {i}",
-                severity="INFO"
             )
         
         # Act & Assert

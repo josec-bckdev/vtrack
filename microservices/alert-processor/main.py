@@ -143,13 +143,12 @@ class AlertConsumer:
                     longitude=alert.longitude,
                     alert_type=alert.alert_type.value,
                     area_name=alert.zone_name,
-                    severity=alert.severity.value
                 )
 
                 if success:
                     logger.warning(
                         f"[ALERT] Route {alert.ruta}: {alert.alert_type.value} "
-                        f"in {alert.zone_name} - Severity: {alert.severity.value}"
+                        f"in {alert.zone_name}"
                     )
                 else:
                     logger.error(f"Failed to queue alert for route {alert.ruta}")
