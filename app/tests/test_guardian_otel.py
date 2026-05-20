@@ -6,6 +6,27 @@ Verify that _watch_slot emits:
   - guardian.collection.start sub-span when collection fires
 
 Fail until app/scheduler.py is instrumented with opentelemetry-api spans.
+
+Why these tests hung (and how _fast_scheduler_clock fixes it)
+-------------------------------------------------------------
+_watch_slot contains two back-to-back while-loops:
+
+  1. Watching loop  — polls is_running(); exits when collection starts.
+  2. Collection-running loop — polls is_running() again; exits when
+     collection finishes OR now() >= window_close_dt.
+
+Tests that freeze time before window_close and set is_running()=True
+break out of loop-1 immediately (collection is already running), then
+enter loop-2.  Inside loop-2, is_running() is still True and the frozen
+clock never reaches window_close_dt, so the loop spins calling
+asyncio.sleep(30) forever — the test hangs.
+
+Fix: _fast_scheduler_clock is an autouse fixture that replaces
+asyncio.sleep with a side_effect that updates the frozen clock past
+window_close on the first call.  On the next iteration of loop-2 the
+condition ``now >= window_close_dt`` becomes True and the loop exits
+cleanly.  _watch_slot then returns GuardianState.STARTED (because the
+plain MagicMock adapter reports datapoints_collected()=1 > 0).
 """
 import pytest
 from datetime import datetime, time, timedelta
