@@ -94,15 +94,24 @@ Each commit must:
 ## Running tests
 
 ```bash
-pytest app/tests/ -v --cov=app --cov-report=term-missing
+pytest -q
 ```
 
-Expected output: all tests pass, coverage ≥ 80%.
+Fast local run — no coverage, quiet output (both `app/tests/` and
+`microservices/conductor/tests/` are included automatically via `testpaths`
+in `pytest.ini`). Expected: all 435 tests pass.
 
-For a specific sub-package:
 ```bash
-pytest app/tests/cookie_refresh/ -v
+pytest --cov=app --cov-report=term-missing
 ```
+
+Full coverage run for CI / pre-commit. Expected: all tests pass, coverage ≥ 80%.
+
+```bash
+pytest app/tests/cookie_refresh/ -q
+```
+
+Target a specific sub-package (append `-v` for per-test detail).
 
 ---
 
