@@ -249,7 +249,6 @@ class TestMessageFormatting:
             'ruta': 101,
             'alert_type': 'GEOFENCE_ENTRY',
             'area_name': 'Downtown',
-            'severity': 'INFO',
             'latitude': 4.7110,
             'longitude': -74.0059,
             'timestamp': '2026-02-16 14:30:00'
@@ -261,23 +260,22 @@ class TestMessageFormatting:
         assert "Downtown" in message
         assert "🚌➡️" in message or "ENTRY" in message
     
-    def test_format_alert_with_warning(self, notifier):
-        """Test formatting for warning severity"""
+    def test_format_alert_geofence_exit(self, notifier):
+        """Test formatting for geofence exit alert"""
         alert = {
             'ruta': 202,
             'alert_type': 'GEOFENCE_EXIT',
             'area_name': 'Zone A',
-            'severity': 'WARNING',
             'latitude': 4.6,
             'longitude': -74.1,
             'timestamp': '2026-02-16 15:00:00'
         }
-        
+
         message = notifier.format_alert(alert)
-        
+
         assert "202" in message
         assert "Zone A" in message
-        assert "⚠️" in message or "WARNING" in message
+        assert "🚌⬅️" in message or "EXIT" in message
     
     def test_format_alert_includes_map_link(self, notifier, sample_alert_data):
         """Test that formatted message includes Google Maps link"""

@@ -96,7 +96,6 @@ def sample_alert_data() -> Dict:
         'ruta': 101,
         'alert_type': 'GEOFENCE_ENTRY',
         'area_name': 'Test Zone',
-        'severity': 'WARNING',
         'latitude': 4.7110,
         'longitude': -74.0059,
         'timestamp': '2026-02-16 12:00:00'

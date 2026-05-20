@@ -191,29 +191,20 @@ class TelegramNotifier:
     
     def format_alert(self, alert_data):
         """Format an alert into a nice message"""
-        # Emoji mapping
         icons = {
             "GEOFENCE_ENTRY": "🚌➡️",
             "GEOFENCE_EXIT": "🚌⬅️",
-            "WARNING": "⚠️",
-            "CRITICAL": "🚨",
-            "INFO": "ℹ️"
         }
-        
+
         alert_type = alert_data.get('alert_type', 'ALERT')
-        severity = alert_data.get('severity', 'INFO')
-        
-        # Get emoji or use default
         main_icon = icons.get(alert_type, "🔔")
-        severity_icon = icons.get(severity, "ℹ️")
-        
-        # Format coordinates for Google Maps
+
         lat = alert_data.get('latitude', 0)
         lng = alert_data.get('longitude', 0)
         maps_url = f"https://maps.google.com/?q={lat},{lng}"
-        
+
         message = f"""
-{severity_icon} *VTRACK ALERT* {main_icon}
+{main_icon} *VTRACK ALERT*
 
 *Route:* {alert_data.get('ruta', 'N/A')}
 *Event:* {alert_data.get('alert_type', 'N/A').replace('_', ' ')}
@@ -222,7 +213,7 @@ class TelegramNotifier:
 
 📍 [View on Map]({maps_url})
         """.strip()
-        
+
         return message
     
     def send_alert(self, alert_data):
@@ -299,7 +290,6 @@ class TelegramNotifier:
             'ruta': 101,
             'alert_type': 'GEOFENCE_ENTRY',
             'area_name': 'Test Zone',
-            'severity': 'INFO',
             'latitude': 4.7110,
             'longitude': -74.0059,
             'timestamp': '2024-01-01 12:00:00'

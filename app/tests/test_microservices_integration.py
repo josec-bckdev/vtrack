@@ -243,7 +243,6 @@ class TestAlertQueueIntegration:
                 longitude=alert.longitude,
                 alert_type=alert.alert_type.value,
                 area_name=alert.zone_name,
-                severity=alert.severity.value
             )
         
         # Assert
@@ -253,29 +252,21 @@ class TestAlertQueueIntegration:
         assert queued_alert['alert_type'] == 'GEOFENCE_ENTRY'
         assert queued_alert['area_name'] == entry_zone.name
 
-    def test_alert_queue_severity_levels(self, message_queue_fixture):
-        """
-        Different severity levels should queue and retrieve correctly
-        """
-        # Arrange
+    def test_alert_queue_payload_has_no_severity(self, message_queue_fixture):
+        """Alert payload must not include severity after domain clean-up."""
         queue = message_queue_fixture
-        
-        # Act - push alerts with different severities
-        severities = ['INFO', 'WARNING', 'CRITICAL']
-        for idx, severity in enumerate(severities):
-            queue.push_alert(
-                ruta=100 + idx,
-                latitude=4.7110,
-                longitude=-74.0059,
-                alert_type='GEOFENCE_ENTRY',
-                area_name='Zone',
-                severity=severity
-            )
-        
-        # Assert - retrieve and verify
-        for expected_severity in severities:
-            alert = queue.pop_alert()
-            assert alert['severity'] == expected_severity
+
+        queue.push_alert(
+            ruta=101,
+            latitude=4.7110,
+            longitude=-74.0059,
+            alert_type='GEOFENCE_ENTRY',
+            area_name='Zone',
+        )
+
+        alert = queue.pop_alert()
+        assert alert is not None
+        assert "severity" not in alert
 
 
 class TestHighVolumeScenarios:
@@ -331,7 +322,6 @@ class TestHighVolumeScenarios:
                     longitude=-74.0059,
                     alert_type='GEOFENCE_ENTRY',
                     area_name='Zone',
-                    severity='INFO'
                 )
         
         # Assert
