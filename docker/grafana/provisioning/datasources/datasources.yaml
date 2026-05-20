@@ -15,6 +15,12 @@ datasources:
         hide: false
       nodeGraph:
         enabled: true
+      lokiSearch:
+        datasourceUid: ''
+      traceQuery:
+        timeShiftEnabled: true
+        spanStartTimeShift: '-30m'
+        spanEndTimeShift: '30m'
 
   - name: Prometheus
     type: prometheus

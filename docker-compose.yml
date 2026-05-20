@@ -58,6 +58,8 @@ services:
       OTLP_ENDPOINT: http://tempo:4317
       VNC_BROWSER_URL: http://vnc-browser:8080
       VNC_CONTAINER_NAME: vnc_browser
+      VNC_CONTAINER_IMAGE: vtrack-vnc-browser
+      VNC_CONTAINER_NETWORK: vtrack-network
       PROGRAMMED_STEPS_PATH: /data/programmed_steps.json
       LOGIN_EMAIL: ${LOGIN_EMAIL}
       LOGIN_PASSWORD: ${LOGIN_PASSWORD}
@@ -215,7 +217,7 @@ services:
 
   # Observability stack
   tempo:
-    image: grafana/tempo:latest
+    image: grafana/tempo:2.7.1
     container_name: tempo
     restart: "no"
     command: ["-config.file=/etc/tempo.yaml"]
