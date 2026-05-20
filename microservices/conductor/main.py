@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import time
 
+import httpx
 from opentelemetry.instrumentation.httpx import AsyncOpenTelemetryTransport
 
 from conductor.adapters.container_gateway import DockerContainerGateway
@@ -39,7 +40,7 @@ async def main() -> None:
     otlp_endpoint = os.environ.get("OTLP_ENDPOINT", "")
     if otlp_endpoint:
         configure_tracing("conductor", otlp_endpoint)
-        transport: AsyncOpenTelemetryTransport | None = AsyncOpenTelemetryTransport()
+        transport: AsyncOpenTelemetryTransport | None = AsyncOpenTelemetryTransport(httpx.AsyncHTTPTransport())
         logger.info("OTel tracing configured — exporting to %s", otlp_endpoint)
     else:
         transport = None
