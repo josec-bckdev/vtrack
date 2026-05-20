@@ -12,11 +12,30 @@ from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import app.scheduler as _scheduler_mod
 from app.config import JobSlot
 from app.scheduler import Scheduler, GuardianState
 
 
 TZ = ZoneInfo("America/Bogota")
+
+# Sentinel time well past any window_close used in this file.
+_PAST_ALL_WINDOWS = datetime(2026, 5, 20, 7, 0, tzinfo=TZ)
+
+
+@pytest.fixture(autouse=True)
+def _fast_scheduler_clock():
+    """Patch asyncio.sleep so it advances the frozen scheduler clock past
+    window_close on first call.  Without this, _watch_slot's collection-running
+    loop (scheduler.py lines ~271-279) never exits when is_running()=True and
+    time is frozen before window_close, hanging the test indefinitely."""
+    async def _advance(*_a, **_kw):
+        dt = getattr(_scheduler_mod, "datetime", None)
+        if dt is not None and hasattr(dt.now, "return_value"):
+            dt.now.return_value = _PAST_ALL_WINDOWS
+
+    with patch("asyncio.sleep", side_effect=_advance):
+        yield
 
 
 def _dt(h: int, m: int, s: int = 0) -> datetime:
@@ -41,6 +60,7 @@ def _make_adapter(*, running: bool = False):
     adapter = MagicMock()
     adapter.is_running.return_value = running
     adapter.start = AsyncMock()
+    adapter.datapoints_collected.return_value = 1
     return adapter
 
 
