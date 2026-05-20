@@ -132,6 +132,10 @@ class Conductor:
                         logger.warning(
                             "Guardian %s slot MISSED — collection did not fire", slot_name
                         )
+                    elif outcome == "failed":
+                        logger.warning(
+                            "Guardian %s slot FAILED — collection ran but collected no data", slot_name
+                        )
                     else:
                         logger.info(
                             "Guardian %s slot complete with outcome: %s", slot_name, outcome

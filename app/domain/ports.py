@@ -45,6 +45,10 @@ class ICollectionStatusAdapter(ABC):
         """Return True if a collection is currently active."""
 
     @abstractmethod
+    def datapoints_collected(self) -> int:
+        """Return the number of datapoints collected in the current/last run."""
+
+    @abstractmethod
     async def start(self) -> None:
         """Start a new collection run."""
 

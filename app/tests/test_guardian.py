@@ -67,6 +67,7 @@ class TestGuardianImports:
         assert hasattr(GuardianState, "WATCHING")
         assert hasattr(GuardianState, "STARTED")
         assert hasattr(GuardianState, "MISSED")
+        assert hasattr(GuardianState, "FAILED")
 
 
 # =============================================================================
@@ -115,35 +116,31 @@ class TestGuardianWatchingToStarted:
 
     @pytest.mark.asyncio
     async def test_transitions_to_started_when_collection_already_running(self):
-        """When the collection starts externally, guardian exits without calling adapter.start."""
-        from app.scheduler import Scheduler
+        """When the collection starts externally, guardian waits for it to finish then reports STARTED."""
+        from app.scheduler import Scheduler, GuardianState
         from app.domain.ports import ICollectionStatusAdapter
 
         scheduler = Scheduler()
         mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
         mock_adapter.start = AsyncMock()
+        # watching: not running → running; completion-wait: still running → done
+        mock_adapter.is_running.side_effect = [False, True, True, False]
+        mock_adapter.datapoints_collected.return_value = 5
 
-        # Clock values: [initial check, loop iter 1 (before grace), loop iter 2 (before grace)]
-        # _watch_slot calls datetime.now() once at the top (init) then once per loop iteration.
-        clock = [_dt(5, 20), _dt(5, 40), _dt(5, 40)]
-        clock_iter = iter(clock)
-
-        # iter 1: not running yet; iter 2: running (started externally)
-        mock_adapter.is_running.side_effect = [False, True]
-
-        sleep_calls = []
+        clock_iter = iter([_dt(5, 20), _dt(5, 40), _dt(5, 40), _dt(5, 50), _dt(6, 0)])
 
         async def fake_sleep(seconds):
-            sleep_calls.append(seconds)
+            pass
 
         with patch("app.scheduler.datetime") as mock_dt, \
              patch("asyncio.sleep", side_effect=fake_sleep):
             mock_dt.now.side_effect = lambda tz=None: next(clock_iter, _dt(7, 0))
             mock_dt.combine = datetime.combine
-            await scheduler._watch_slot(MORNING_SLOT, mock_adapter)
+            result = await scheduler._watch_slot(MORNING_SLOT, mock_adapter)
 
         # start() must NOT have been called — it started on its own
         mock_adapter.start.assert_not_awaited()
+        assert result == GuardianState.STARTED
 
 
 # =============================================================================
@@ -154,19 +151,18 @@ class TestGuardianSelfStart:
 
     @pytest.mark.asyncio
     async def test_calls_adapter_start_after_fire_time_plus_grace(self):
-        """Guardian fires adapter.start() when past fire_time+grace and not running."""
-        from app.scheduler import Scheduler
+        """Guardian fires adapter.start() when past fire_time+grace then waits for completion."""
+        from app.scheduler import Scheduler, GuardianState
         from app.domain.ports import ICollectionStatusAdapter
 
         scheduler = Scheduler()
         mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
         mock_adapter.start = AsyncMock()
+        # watching: not running (guardian fires); completion-wait: immediately done
+        mock_adapter.is_running.side_effect = [False, False]
+        mock_adapter.datapoints_collected.return_value = 3
 
-        # fire_time=05:45, grace=5 min → guardian fires at 05:50
-        # Provide two identical timestamps: [initial check, loop iteration 1]
-        clock = [_dt(5, 51), _dt(5, 51)]
-        clock_iter = iter(clock)
-        mock_adapter.is_running.return_value = False
+        clock_iter = iter([_dt(5, 51), _dt(5, 51), _dt(5, 51)])
 
         async def fake_sleep(seconds):
             pass
@@ -175,9 +171,10 @@ class TestGuardianSelfStart:
              patch("asyncio.sleep", side_effect=fake_sleep):
             mock_dt.now.side_effect = lambda tz=None: next(clock_iter, _dt(7, 0))
             mock_dt.combine = datetime.combine
-            await scheduler._watch_slot(MORNING_SLOT, mock_adapter)
+            result = await scheduler._watch_slot(MORNING_SLOT, mock_adapter)
 
         mock_adapter.start.assert_awaited_once()
+        assert result == GuardianState.STARTED
 
     @pytest.mark.asyncio
     async def test_does_not_call_start_before_grace_expires(self):
@@ -287,7 +284,7 @@ class TestGuardianOutcomeTracking:
 
     @pytest.mark.asyncio
     async def test_status_records_started_outcome_after_self_start(self):
-        """After guardian fires, get_guardian_status shows last_outcome=started."""
+        """After guardian fires and collection collects data, last_outcome=started."""
         from app.scheduler import Scheduler, GuardianState
         from app.domain.ports import ICollectionStatusAdapter
         from app.config import JobSlot, ScheduleConfig
@@ -303,9 +300,10 @@ class TestGuardianOutcomeTracking:
         )
         mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
         mock_adapter.start = AsyncMock()
-        mock_adapter.is_running.return_value = False
+        mock_adapter.is_running.side_effect = [False, False]  # watching: not running; completion-wait: done
+        mock_adapter.datapoints_collected.return_value = 4
 
-        clock = iter([_dt(5, 51), _dt(5, 51)])
+        clock = iter([_dt(5, 51), _dt(5, 51), _dt(5, 51)])
 
         async def fake_sleep(s): pass
 
@@ -314,7 +312,6 @@ class TestGuardianOutcomeTracking:
             mock_dt.now.side_effect = lambda tz=None: next(clock, _dt(7, 0))
             mock_dt.combine = datetime.combine
             await scheduler.activate_guardian("morning", mock_adapter)
-            # Wait for the background task to complete
             if scheduler.morning_guardian_task:
                 await scheduler.morning_guardian_task
 
@@ -496,9 +493,10 @@ class TestGuardianCurrentState:
         )
         mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
         mock_adapter.start = AsyncMock()
-        mock_adapter.is_running.return_value = False
+        mock_adapter.is_running.side_effect = [False, False]
+        mock_adapter.datapoints_collected.return_value = 2
 
-        clock = iter([_dt(5, 51), _dt(5, 51)])
+        clock = iter([_dt(5, 51), _dt(5, 51), _dt(5, 51)])
 
         async def fake_sleep(s): pass
 
@@ -546,3 +544,97 @@ class TestGuardianCurrentState:
         status = scheduler.get_guardian_status()
         assert status["morning"]["current_state"] == GuardianState.MISSED.value
         assert status["afternoon"]["current_state"] == GuardianState.IDLE.value
+
+
+# =============================================================================
+# FAILED outcome — collection ran but collected zero datapoints
+# =============================================================================
+
+class TestGuardianFailedOutcome:
+
+    @pytest.mark.asyncio
+    async def test_returns_failed_when_collection_ran_but_collected_nothing(self):
+        """If collection ran (started) but datapoints == 0, outcome is FAILED."""
+        from app.scheduler import Scheduler, GuardianState
+        from app.domain.ports import ICollectionStatusAdapter
+
+        scheduler = Scheduler()
+        mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
+        mock_adapter.start = AsyncMock()
+        # watching: not running → guardian fires; completion-wait: done immediately
+        mock_adapter.is_running.side_effect = [False, False]
+        mock_adapter.datapoints_collected.return_value = 0
+
+        clock_iter = iter([_dt(5, 51), _dt(5, 51), _dt(5, 51)])
+
+        async def fake_sleep(s): pass
+
+        with patch("app.scheduler.datetime") as mock_dt, \
+             patch("asyncio.sleep", side_effect=fake_sleep):
+            mock_dt.now.side_effect = lambda tz=None: next(clock_iter, _dt(7, 0))
+            mock_dt.combine = datetime.combine
+            result = await scheduler._watch_slot(MORNING_SLOT, mock_adapter)
+
+        assert result == GuardianState.FAILED
+
+    @pytest.mark.asyncio
+    async def test_status_records_failed_outcome(self):
+        """get_guardian_status shows last_outcome=failed when collection collected nothing."""
+        from app.scheduler import Scheduler, GuardianState
+        from app.domain.ports import ICollectionStatusAdapter
+        from app.config import JobSlot, ScheduleConfig
+
+        scheduler = Scheduler()
+        slot = JobSlot(time(5, 0), time(5, 45), 5, time(6, 40))
+        scheduler._schedule_config = ScheduleConfig(
+            timezone="America/Bogota",
+            cookie_refresh_morning=time(5, 40),
+            cookie_refresh_afternoon=time(15, 10),
+            collection_morning=slot,
+            collection_afternoon=slot,
+        )
+        mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
+        mock_adapter.start = AsyncMock()
+        mock_adapter.is_running.side_effect = [False, False]
+        mock_adapter.datapoints_collected.return_value = 0
+
+        clock = iter([_dt(5, 51), _dt(5, 51), _dt(5, 51)])
+
+        async def fake_sleep(s): pass
+
+        with patch("app.scheduler.datetime") as mock_dt, \
+             patch("asyncio.sleep", side_effect=fake_sleep):
+            mock_dt.now.side_effect = lambda tz=None: next(clock, _dt(7, 0))
+            mock_dt.combine = datetime.combine
+            await scheduler.activate_guardian("morning", mock_adapter)
+            if scheduler.morning_guardian_task:
+                await scheduler.morning_guardian_task
+
+        status = scheduler.get_guardian_status()
+        assert status["morning"]["last_outcome"] == GuardianState.FAILED.value
+
+    @pytest.mark.asyncio
+    async def test_failed_when_window_closes_while_collection_running_with_no_data(self):
+        """Window closes while collection running and 0 datapoints → FAILED."""
+        from app.scheduler import Scheduler, GuardianState
+        from app.domain.ports import ICollectionStatusAdapter
+
+        scheduler = Scheduler()
+        mock_adapter = MagicMock(spec=ICollectionStatusAdapter)
+        mock_adapter.start = AsyncMock()
+        # watching: not running → guardian fires; completion-wait: still running when window closes
+        mock_adapter.is_running.side_effect = [False, True]
+        mock_adapter.datapoints_collected.return_value = 0
+
+        # clock: initial, watching(grace check), completion-wait(window closed)
+        clock_iter = iter([_dt(5, 51), _dt(5, 51), _dt(7, 0)])
+
+        async def fake_sleep(s): pass
+
+        with patch("app.scheduler.datetime") as mock_dt, \
+             patch("asyncio.sleep", side_effect=fake_sleep):
+            mock_dt.now.side_effect = lambda tz=None: next(clock_iter, _dt(7, 0))
+            mock_dt.combine = datetime.combine
+            result = await scheduler._watch_slot(MORNING_SLOT, mock_adapter)
+
+        assert result == GuardianState.FAILED

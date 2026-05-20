@@ -21,6 +21,7 @@ class GuardianState(Enum):
     WATCHING = "watching"
     STARTED = "started"
     MISSED = "missed"
+    FAILED = "failed"
 
 
 class Scheduler:
@@ -236,7 +237,7 @@ class Scheduler:
                 wait = (window_open_dt - now).total_seconds()
                 await asyncio.sleep(wait)
 
-            # Watching loop — poll until a terminal state
+            # Watching loop — poll until collection starts or window closes
             _set(GuardianState.WATCHING)
             with _tracer.start_as_current_span("guardian.watching"):
                 while True:
@@ -248,11 +249,10 @@ class Scheduler:
                         return GuardianState.MISSED
 
                     if adapter.is_running():
-                        _set(GuardianState.STARTED)
-                        logger.info("Guardian: collection already running — slot covered")
+                        logger.info("Guardian: collection already running — waiting for completion")
                         with _tracer.start_as_current_span("guardian.collection.start") as s:
                             s.set_attribute("trigger", "already_running")
-                        return GuardianState.STARTED
+                        break
 
                     if now >= grace_dt:
                         logger.info("Guardian: past fire+grace, starting collection")
@@ -261,10 +261,30 @@ class Scheduler:
                             if self.collection_manager is not None:
                                 self.collection_manager._slot = slot_name
                             await adapter.start()
-                        _set(GuardianState.STARTED)
-                        return GuardianState.STARTED
+                        break
 
                     await asyncio.sleep(GUARDIAN_POLL_INTERVAL)
+
+            # Collection is running — wait for it to finish or window to close
+            _set(GuardianState.STARTED)
+            with _tracer.start_as_current_span("guardian.collection.running"):
+                while True:
+                    now = datetime.now(tz)
+                    if now >= window_close_dt:
+                        logger.info("Guardian: window closed while collection was running")
+                        break
+                    if not adapter.is_running():
+                        logger.info("Guardian: collection finished before window close")
+                        break
+                    await asyncio.sleep(GUARDIAN_POLL_INTERVAL)
+
+            if adapter.datapoints_collected() > 0:
+                _set(GuardianState.STARTED)
+                return GuardianState.STARTED
+
+            _set(GuardianState.FAILED)
+            logger.warning("Guardian: collection ran but collected no datapoints — outcome FAILED")
+            return GuardianState.FAILED
 
     async def _start_collection_if_not_running(self, schedule_type: str):
         try:

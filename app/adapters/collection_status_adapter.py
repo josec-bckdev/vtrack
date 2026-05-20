@@ -8,5 +8,8 @@ class AsyncCollectionManagerAdapter(ICollectionStatusAdapter):
     def is_running(self) -> bool:
         return self._manager._is_running
 
+    def datapoints_collected(self) -> int:
+        return self._manager.datapoints_collected
+
     async def start(self) -> None:
         await self._manager.start()
