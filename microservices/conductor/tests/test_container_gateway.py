@@ -1,5 +1,6 @@
 """Failing tests for DockerContainerGateway — mocks docker SDK, no daemon needed."""
 import pytest
+import docker.errors
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from conductor.adapters.container_gateway import DockerContainerGateway
@@ -71,6 +72,12 @@ class TestStart:
             await gateway.start("api")
         container.start.assert_not_called()
 
+    async def test_skips_start_when_container_not_found(self, gateway):
+        with patch("conductor.adapters.container_gateway.docker") as mock_docker:
+            mock_docker.errors.NotFound = docker.errors.NotFound
+            mock_docker.from_env.return_value.containers.get.side_effect = docker.errors.NotFound("alert_processor")
+            await gateway.start("alert_processor")  # must not raise
+
 
 class TestStop:
     async def test_calls_stop_on_container(self, gateway):
@@ -86,6 +93,12 @@ class TestStop:
             mock_docker.from_env.return_value.containers.get.return_value = container
             await gateway.stop("api")
         container.stop.assert_not_called()
+
+    async def test_skips_stop_when_container_not_found(self, gateway):
+        with patch("conductor.adapters.container_gateway.docker") as mock_docker:
+            mock_docker.errors.NotFound = docker.errors.NotFound
+            mock_docker.from_env.return_value.containers.get.side_effect = docker.errors.NotFound("alert_processor")
+            await gateway.stop("alert_processor")  # must not raise
 
 
 class TestGetStats:
