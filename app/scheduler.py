@@ -8,6 +8,7 @@ from opentelemetry import trace
 
 from app.config import JobSlot, ScheduleConfig, load_schedule_config
 from app.cookie_refresh import run_refresh
+from app.metrics import collection_total, guardian_state
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
@@ -176,6 +177,7 @@ class Scheduler:
             "last_outcome": outcome.value,
             "completed_at": datetime.now(ZoneInfo("America/Bogota")).isoformat(),
         }
+        collection_total.labels(slot=slot_name, outcome=outcome.value).inc()
         return outcome
 
     async def activate_guardian(self, slot_name: str, adapter) -> None:
@@ -204,6 +206,10 @@ class Scheduler:
         def _set(state: GuardianState) -> None:
             if slot_name:
                 self._guardian_current_state[slot_name] = state.value
+                for s in GuardianState:
+                    guardian_state.labels(slot=slot_name, state=s.value).set(
+                        1.0 if s is state else 0.0
+                    )
 
         tz = ZoneInfo("America/Bogota")
         now = datetime.now(tz)
@@ -252,6 +258,8 @@ class Scheduler:
                         logger.info("Guardian: past fire+grace, starting collection")
                         with _tracer.start_as_current_span("guardian.collection.start") as s:
                             s.set_attribute("trigger", "grace_exceeded")
+                            if self.collection_manager is not None:
+                                self.collection_manager._slot = slot_name
                             await adapter.start()
                         _set(GuardianState.STARTED)
                         return GuardianState.STARTED
