@@ -724,3 +724,15 @@ class TestComplexGeofencingScenarios:
         # Routes should be in different zones
         assert zone_1.zone_id not in status_402_depot['current_zones']
         assert zone_2.zone_id not in status_401_school['current_zones']
+
+
+class TestSeverityDeprecated:
+    """alert.severity was intentionally omitted from OTel spans — remove it from the domain."""
+
+    def test_location_alert_has_no_severity_field(self):
+        from dataclasses import fields
+        assert "severity" not in {f.name for f in fields(LocationAlert)}
+
+    def test_alert_severity_enum_not_exported(self):
+        import shared.location_alerts as m
+        assert not hasattr(m, "AlertSeverity")
